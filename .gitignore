@@ -1,0 +1,16 @@
+*.DS_Store
+
+# Local credentials — never commit
+esp-32-dev/SECRETS.h
+
+# Arduino / build artifacts
+build/
+*.elf
+*.bin
+*.map
+*.hex
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
