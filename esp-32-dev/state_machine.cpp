@@ -1,0 +1,386 @@
+#include "state_machine.h"
+#include "config.h"
+#include "settings.h"
+#include "sensors.h"
+#include "actuator.h"
+#include "fault_log.h"
+#include "event_queue.h"
+#include "time_utils.h"
+#include "menu.h"
+#include "ui.h"
+
+static SystemState s_state = ST_BOOT_SELFTEST;
+static SystemState s_prev  = ST_BOOT_SELFTEST;
+static uint32_t    s_enteredAt = 0;
+static uint32_t    s_pumpStartedAt = 0;
+
+// Sub-phase tracking for STARTING / STOPPING
+static uint32_t s_phaseStart = 0;
+static bool     s_sawFb = false;
+static bool     s_sawCurrent = false;
+static bool     s_sawFlow = false;
+
+// Timer state
+static uint32_t s_timerDeadline = 0;
+static bool     s_timerActive = false;
+static uint8_t  s_timerWhich = 0;
+
+// Fault repeat counter
+struct RepeatCtr { uint32_t firstAt; uint8_t count; FaultCode last; };
+static RepeatCtr s_rep = {0, 0, FC_NONE};
+
+const char* sm_stateName(SystemState s) {
+  switch (s) {
+    case ST_BOOT_SELFTEST: return "BOOT_SELFTEST";
+    case ST_IDLE:          return "IDLE";
+    case ST_AUTO_FILLING:  return "AUTO_FILLING";
+    case ST_MANUAL_ON:     return "MANUAL_ON";
+    case ST_TIMER_RUNNING: return "TIMER_RUNNING";
+    case ST_STARTING:      return "STARTING";
+    case ST_STOPPING:      return "STOPPING";
+    case ST_FULL:          return "FULL";
+    case ST_ERROR:         return "ERROR";
+    case ST_FAULT_LATCHED: return "FAULT_LATCHED";
+    case ST_SLEEP:         return "SLEEP";
+    case ST_MAINTENANCE:   return "MAINT";
+  }
+  return "?";
+}
+
+bool sm_isPumpRunningState(SystemState s) {
+  return s == ST_AUTO_FILLING || s == ST_MANUAL_ON || s == ST_TIMER_RUNNING;
+}
+
+SystemState sm_state() { return s_state; }
+
+void sm_clearLatched() {
+  if (s_state == ST_FAULT_LATCHED || s_state == ST_ERROR) {
+    s_state = ST_IDLE; s_enteredAt = millis();
+    Serial.printf("%s cleared → IDLE\n", LOG_TAG_SM);
+  }
+}
+
+static void enterState(SystemState ns) {
+  if (ns == s_state) return;
+  s_prev = s_state;
+  s_state = ns;
+  s_enteredAt = millis();
+  s_phaseStart = millis();
+  s_sawFb = s_sawCurrent = s_sawFlow = false;
+  Serial.printf("%s %s -> %s\n", LOG_TAG_SM, sm_stateName(s_prev), sm_stateName(s_state));
+  ui_requestUpdate();  // trigger UI refresh on state change
+
+  switch (ns) {
+    case ST_STARTING:
+      actuator_pulseOn();
+      s_pumpStartedAt = millis();
+      break;
+    case ST_STOPPING:
+      actuator_pulseOff();
+      s_timerActive = false;
+      break;
+    case ST_FAULT_LATCHED:
+      actuator_panicOff();
+      break;
+    default: break;
+  }
+}
+
+static void recordFault(FaultCode c, FaultSeverity sev) {
+  FaultEntry fe{};
+  fe.ts = millis();
+  fe.state = (uint8_t)s_state;
+  fe.code = c; fe.severity = sev;
+  fe.levelPct = sensors_levelPct();
+  fe.flowLpmX10 = sensors_flowLpmX10();
+  fe.currentMv  = sensors_currentMv();
+  faultlog_record(fe);
+
+  // Only escalate for ERROR or PANIC, never for INFO/WARN.
+  if (sev < SEV_ERROR) return;
+
+  // Only escalate to FAULT_LATCHED for repeated ERROR or any PANIC.
+  if (c == s_rep.last && (uint32_t)(millis() - s_rep.firstAt) < DEF_FAULT_REPEAT_WINDOW) {
+    s_rep.count++;
+  } else {
+    s_rep.last = c; s_rep.firstAt = millis(); s_rep.count = 1;
+  }
+  if (s_rep.count >= DEF_FAULT_REPEAT_LIMIT || sev == SEV_PANIC) {
+    enterState(ST_FAULT_LATCHED);
+    s_rep.count = 0;
+  } else {
+    enterState(ST_ERROR);
+  }
+}
+
+// ============== event handling ==============
+void sm_handleEvent(const Event& e) {
+  switch (e.type) {
+
+    case EV_PANIC_STOP:
+      actuator_panicOff();
+      enterState(ST_FAULT_LATCHED);
+      return;
+
+    case EV_FAULT:
+      recordFault(e.p.fault.code, e.p.fault.severity);
+      return;
+
+    case EV_SELFTEST_RESULT:
+      if (e.p.u32 == 0) {
+        // restore mode (but never auto-resume MANUAL/TIMER)
+        uint8_t m = settings().mode;
+        if (settings().sleepMode)               enterState(ST_SLEEP);
+        else if (m == MODE_MAINTENANCE)         enterState(ST_MAINTENANCE);
+        else                                    enterState(ST_IDLE);
+      } else {
+        enterState(ST_MAINTENANCE);
+      }
+      return;
+
+    case EV_MODE_REQ: {
+      uint8_t m = (uint8_t)e.p.i32;
+      // Refuse manual when in SLEEP
+      if (s_state == ST_SLEEP && m == MODE_MANUAL) return;
+      settings_setU8("mode", m);
+      if (m == MODE_SLEEP) { settings_setBool("sleepMode", true); enterState(ST_SLEEP); }
+      else if (m == MODE_MAINTENANCE) enterState(ST_MAINTENANCE);
+      else if (m == MODE_AUTO) {
+        if (s_state == ST_SLEEP || s_state == ST_MAINTENANCE) {
+          settings_setBool("sleepMode", false);
+          enterState(ST_IDLE);
+        }
+      }
+      return;
+    }
+
+    case EV_BUTTON: {
+      Serial.printf("%s BTN%u %s\n", LOG_TAG_SM,
+        (unsigned)e.p.btn.id, e.p.btn.kind == PRESS_LONG ? "LONG" : "SHORT");
+
+      // If menu is open (or about to open via B4 short), let menu consume input.
+      if (menu_isOpen() || (e.p.btn.id == BTN4 && e.p.btn.kind == PRESS_SHORT)) {
+        menu_handleButton(e.p.btn.id, e.p.btn.kind);
+        return;
+      }
+
+      if (e.p.btn.id == BTN3 && e.p.btn.kind == PRESS_LONG) {
+        // HARD STOP / reset
+        if (sm_isPumpRunningState(s_state) || s_state == ST_STARTING) {
+          enterState(ST_STOPPING);
+        } else if (s_state == ST_FAULT_LATCHED || s_state == ST_ERROR) {
+          sm_clearLatched();
+        }
+      } else if (e.p.btn.id == BTN4 && e.p.btn.kind == PRESS_LONG) {
+        // toggle SLEEP
+        bool now = !settings().sleepMode;
+        settings_setBool("sleepMode", now);
+        enterState(now ? ST_SLEEP : ST_IDLE);
+      } else if (e.p.btn.id == BTN1 && e.p.btn.kind == PRESS_SHORT) {
+        // silence buzzer (handled by buzzer module hook later); for now log
+        Serial.printf("%s buzzer silence\n", LOG_TAG_SM);
+      } else if (e.p.btn.id == BTN1 && e.p.btn.kind == PRESS_LONG) {
+        // toggle AUTO/MANUAL
+        if (s_state == ST_SLEEP || s_state == ST_MAINTENANCE) return;
+        if (s_state == ST_MANUAL_ON) {
+          settings_setU8("mode", MODE_AUTO);
+          enterState(ST_STOPPING);
+        } else if (s_state == ST_IDLE) {
+          settings_setU8("mode", MODE_MANUAL);
+#if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
+          enterState(ST_STARTING);
+#else
+          Serial.printf("%s MANUAL request ignored (monitor-only)\n", LOG_TAG_SM);
+#endif
+        }
+      } else if (e.p.btn.id == BTN2 && e.p.btn.kind == PRESS_SHORT) {
+        if (s_state != ST_IDLE) return;
+#if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
+        s_timerActive = true;
+        s_timerWhich = TMR_1;
+        s_timerDeadline = millis() + settings().timer1Ms;
+        enterState(ST_STARTING);
+#else
+        Serial.printf("%s TIMER1 ignored (monitor-only)\n", LOG_TAG_SM);
+#endif
+      } else if (e.p.btn.id == BTN3 && e.p.btn.kind == PRESS_SHORT) {
+        if (s_state != ST_IDLE) return;
+#if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
+        s_timerActive = true;
+        s_timerWhich = TMR_2;
+        s_timerDeadline = millis() + settings().timer2Ms;
+        enterState(ST_STARTING);
+#else
+        Serial.printf("%s TIMER2 ignored (monitor-only)\n", LOG_TAG_SM);
+#endif
+      }
+      return;
+    }
+
+    case EV_LEVEL_CHANGED:
+      // Reaching 100% is a normal stop, not a fault. Only transition states.
+      if (e.p.i32 >= 100) {
+        if (sm_isPumpRunningState(s_state) || s_state == ST_STARTING) {
+          enterState(ST_STOPPING);
+        } else if (s_state == ST_IDLE) {
+          enterState(ST_FULL);
+        }
+        // Do NOT record overflow fault here; only escalate if safety supervisor detects true error.
+      }
+      return;
+
+    case EV_FB_ON:
+      if (s_state == ST_STARTING && e.p.boolean) s_sawFb = true;
+      return;
+
+    case EV_FB_OFF:
+      if (s_state == ST_STOPPING && e.p.boolean) s_sawFb = true;
+      return;
+
+    case EV_CURRENT_PRESENT:
+      if (s_state == ST_STARTING && e.p.boolean) s_sawCurrent = true;
+      else if (s_state == ST_STOPPING && !e.p.boolean) s_sawCurrent = true;
+      else if (sm_isPumpRunningState(s_state) && !e.p.boolean) {
+        recordFault(FC_NO_CURRENT, SEV_ERROR);
+        enterState(ST_STOPPING);
+      }
+      return;
+
+    case EV_FLOW_TICK:
+      if (s_state == ST_STARTING && e.p.flow.lpm_x10 >= DEF_MIN_LPM_X10) s_sawFlow = true;
+      else if (s_state == ST_STOPPING && e.p.flow.lpm_x10 < DEF_MIN_LPM_X10) s_sawFlow = true;
+      return;
+
+    case EV_TIMER_EXPIRED:
+      if (e.p.i32 == TMR_MAX_RUNTIME) {
+        recordFault(FC_OVERRUN, SEV_ERROR);
+        enterState(ST_STOPPING);
+      } else if (s_timerActive) {
+        enterState(ST_STOPPING);
+      }
+      return;
+
+    default: return;
+  }
+}
+
+// ============== periodic tick ==============
+void sm_tick() {
+
+  switch (s_state) {
+
+    case ST_BOOT_SELFTEST:
+      // wait for SELFTEST_RESULT event
+      break;
+
+    case ST_IDLE: {
+      if (settings().sleepMode) { enterState(ST_SLEEP); break; }
+#if !MONITOR_ONLY_MODE
+      if (settings().mode == MODE_AUTO && sensors_levelPct() < 25) {
+        enterState(ST_STARTING);
+      }
+#endif
+      break;
+    }
+
+    case ST_FULL:
+      if (sensors_levelPct() < (100 - settings().levelHystPct)) enterState(ST_IDLE);
+      break;
+
+    case ST_SLEEP:
+      if (!settings().sleepMode) enterState(ST_IDLE);
+      break;
+
+    case ST_STARTING: {
+      uint32_t since = sinceMs(s_phaseStart);
+      if (s_sawFb && s_sawCurrent && s_sawFlow) {
+        // Decide which running state
+        if (s_timerActive) enterState(ST_TIMER_RUNNING);
+        else if (settings().mode == MODE_MANUAL) enterState(ST_MANUAL_ON);
+        else enterState(ST_AUTO_FILLING);
+        break;
+      }
+      if (!s_sawFb && since > settings().feedbackMs) {
+        recordFault(FC_NO_FEEDBACK, SEV_ERROR);
+        enterState(ST_STOPPING);
+        break;
+      }
+      if (!s_sawCurrent && since > settings().currentMs) {
+        recordFault(FC_NO_CURRENT, SEV_ERROR);
+        enterState(ST_STOPPING);
+        break;
+      }
+      if (!s_sawFlow && since > settings().dryRunMs) {
+        recordFault(FC_DRY_RUN, SEV_ERROR);
+        enterState(ST_STOPPING);
+        break;
+      }
+      break;
+    }
+
+    case ST_STOPPING: {
+      uint32_t since = sinceMs(s_phaseStart);
+      bool current = sensors_currentPresent();
+      bool flow    = sensors_flowLpmX10() >= DEF_MIN_LPM_X10;
+      if (s_sawFb && !current && !flow) {
+        // Decide where to go
+        enterState(sensors_levelPct() >= 100 ? ST_FULL : ST_IDLE);
+        break;
+      }
+      if (since > settings().feedbackMs && !s_sawFb) {
+        recordFault(FC_NO_FEEDBACK, SEV_ERROR);
+        // re-attempt one more pulse
+        actuator_pulseOff();
+        s_phaseStart = millis();
+        break;
+      }
+      if (since > settings().currentOffMs && current) {
+        recordFault(FC_STUCK_PUMP, SEV_PANIC);
+        enterState(ST_FAULT_LATCHED);
+        break;
+      }
+      if (since > settings().flowOffMs && flow) {
+        recordFault(FC_STUCK_PUMP, SEV_PANIC);
+        enterState(ST_FAULT_LATCHED);
+        break;
+      }
+      break;
+    }
+
+    case ST_AUTO_FILLING:
+    case ST_MANUAL_ON:
+    case ST_TIMER_RUNNING: {
+      // Reaching 100% is a normal stop, not a fault — go straight to STOPPING.
+      if (sensors_levelPct() >= 100) {
+        enterState(ST_STOPPING);
+        break;
+      }
+      // max runtime
+      if (sinceMs(s_pumpStartedAt) > settings().maxRuntimeMs) {
+        recordFault(FC_OVERRUN, SEV_ERROR);
+        enterState(ST_STOPPING);
+        break;
+      }
+      // timer
+      if (s_state == ST_TIMER_RUNNING && s_timerActive && (int32_t)(millis() - s_timerDeadline) >= 0) {
+        Event e{}; e.type = EV_TIMER_EXPIRED; e.p.i32 = s_timerWhich;
+        sendEvent(e);
+      }
+      break;
+    }
+
+    case ST_ERROR:
+      if (sinceMs(s_enteredAt) > DEF_OVERRUN_COOLDOWN_MS) enterState(ST_IDLE);
+      break;
+
+    case ST_FAULT_LATCHED:
+    case ST_MAINTENANCE:
+    default:
+      break;
+  }
+}
+
+void sm_init() {
+  s_state = ST_BOOT_SELFTEST;
+  s_enteredAt = millis();
+}
