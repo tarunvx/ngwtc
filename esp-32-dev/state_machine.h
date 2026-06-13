@@ -25,5 +25,6 @@ SystemState   sm_state();
 const char*   sm_stateName(SystemState s);
 bool          sm_isPumpRunningState(SystemState s);
 void          sm_clearLatched();
+uint32_t      sm_pumpStartedAt(); // millis() when pump last entered STARTING
 
 #endif

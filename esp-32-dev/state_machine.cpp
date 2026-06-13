@@ -53,6 +53,8 @@ bool sm_isPumpRunningState(SystemState s) {
 
 SystemState sm_state() { return s_state; }
 
+uint32_t sm_pumpStartedAt() { return s_pumpStartedAt; }
+
 void sm_clearLatched() {
   if (s_state == ST_FAULT_LATCHED || s_state == ST_ERROR) {
     s_state = ST_IDLE; s_enteredAt = millis();
@@ -164,6 +166,18 @@ void sm_handleEvent(const Event& e) {
         return;
       }
 
+      // Operating screen toggle: B1 short while pump running toggles home/op view
+      if (e.p.btn.id == BTN1 && e.p.btn.kind == PRESS_SHORT && ui_isOpScreen()) {
+        ui_toggleOpScreen();
+        return;
+      }
+      // Also allow toggling back to op screen from home while running
+      if (e.p.btn.id == BTN1 && e.p.btn.kind == PRESS_SHORT &&
+          (sm_isPumpRunningState(s_state) || s_state == ST_STARTING) && !ui_isOpScreen()) {
+        ui_toggleOpScreen();
+        return;
+      }
+
       if (e.p.btn.id == BTN3 && e.p.btn.kind == PRESS_LONG) {
         // HARD STOP / reset
         if (sm_isPumpRunningState(s_state) || s_state == ST_STARTING) {
@@ -177,7 +191,7 @@ void sm_handleEvent(const Event& e) {
         settings_setBool("sleepMode", now);
         enterState(now ? ST_SLEEP : ST_IDLE);
       } else if (e.p.btn.id == BTN1 && e.p.btn.kind == PRESS_SHORT) {
-        // silence buzzer (handled by buzzer module hook later); for now log
+        // silence buzzer (only when pump NOT running — running case handled above)
         Serial.printf("%s buzzer silence\n", LOG_TAG_SM);
       } else if (e.p.btn.id == BTN1 && e.p.btn.kind == PRESS_LONG) {
         // toggle AUTO/MANUAL
@@ -187,6 +201,8 @@ void sm_handleEvent(const Event& e) {
           enterState(ST_STOPPING);
         } else if (s_state == ST_IDLE) {
           settings_setU8("mode", MODE_MANUAL);
+          // Clear sleep flag so IDLE tick doesn't push us back to SLEEP
+          if (settings().sleepMode) settings_setBool("sleepMode", false);
 #if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
           enterState(ST_STARTING);
 #else
@@ -195,6 +211,7 @@ void sm_handleEvent(const Event& e) {
         }
       } else if (e.p.btn.id == BTN2 && e.p.btn.kind == PRESS_SHORT) {
         if (s_state != ST_IDLE) return;
+        if (settings().sleepMode) settings_setBool("sleepMode", false);
 #if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
         s_timerActive = true;
         s_timerWhich = TMR_1;
@@ -205,6 +222,7 @@ void sm_handleEvent(const Event& e) {
 #endif
       } else if (e.p.btn.id == BTN3 && e.p.btn.kind == PRESS_SHORT) {
         if (s_state != ST_IDLE) return;
+        if (settings().sleepMode) settings_setBool("sleepMode", false);
 #if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
         s_timerActive = true;
         s_timerWhich = TMR_2;
@@ -241,8 +259,11 @@ void sm_handleEvent(const Event& e) {
       if (s_state == ST_STARTING && e.p.boolean) s_sawCurrent = true;
       else if (s_state == ST_STOPPING && !e.p.boolean) s_sawCurrent = true;
       else if (sm_isPumpRunningState(s_state) && !e.p.boolean) {
-        recordFault(FC_NO_CURRENT, SEV_ERROR);
-        enterState(ST_STOPPING);
+        // Only fault if current sense is NOT bypassed
+        if (!settings().bypassCurrentSense) {
+          recordFault(FC_NO_CURRENT, SEV_ERROR);
+          enterState(ST_STOPPING);
+        }
       }
       return;
 
@@ -293,24 +314,32 @@ void sm_tick() {
 
     case ST_STARTING: {
       uint32_t since = sinceMs(s_phaseStart);
-      if (s_sawFb && s_sawCurrent && s_sawFlow) {
+      // If bypass flags set, consider those checks as "passed"
+      bool needFb      = !settings().bypassFeedback;
+      bool needCurrent = !settings().bypassCurrentSense;
+      bool needFlow    = !settings().bypassFlowSense;
+      bool gotFb      = needFb      ? s_sawFb      : true;
+      bool gotCurrent = needCurrent ? s_sawCurrent : true;
+      bool gotFlow    = needFlow    ? s_sawFlow    : true;
+
+      if (gotFb && gotCurrent && gotFlow) {
         // Decide which running state
         if (s_timerActive) enterState(ST_TIMER_RUNNING);
         else if (settings().mode == MODE_MANUAL) enterState(ST_MANUAL_ON);
         else enterState(ST_AUTO_FILLING);
         break;
       }
-      if (!s_sawFb && since > settings().feedbackMs) {
+      if (needFb && !s_sawFb && since > settings().feedbackMs) {
         recordFault(FC_NO_FEEDBACK, SEV_ERROR);
         enterState(ST_STOPPING);
         break;
       }
-      if (!s_sawCurrent && since > settings().currentMs) {
+      if (needCurrent && !s_sawCurrent && since > settings().currentMs) {
         recordFault(FC_NO_CURRENT, SEV_ERROR);
         enterState(ST_STOPPING);
         break;
       }
-      if (!s_sawFlow && since > settings().dryRunMs) {
+      if (needFlow && !s_sawFlow && since > settings().dryRunMs) {
         recordFault(FC_DRY_RUN, SEV_ERROR);
         enterState(ST_STOPPING);
         break;
@@ -320,26 +349,27 @@ void sm_tick() {
 
     case ST_STOPPING: {
       uint32_t since = sinceMs(s_phaseStart);
-      bool current = sensors_currentPresent();
-      bool flow    = sensors_flowLpmX10() >= DEF_MIN_LPM_X10;
-      if (s_sawFb && !current && !flow) {
+      bool current = settings().bypassCurrentSense ? false : sensors_currentPresent();
+      bool flow    = settings().bypassFlowSense    ? false : (sensors_flowLpmX10() >= DEF_MIN_LPM_X10);
+      bool gotFb   = settings().bypassFeedback     ? true  : s_sawFb;
+      if (gotFb && !current && !flow) {
         // Decide where to go
         enterState(sensors_levelPct() >= 100 ? ST_FULL : ST_IDLE);
         break;
       }
-      if (since > settings().feedbackMs && !s_sawFb) {
+      if (!settings().bypassFeedback && since > settings().feedbackMs && !s_sawFb) {
         recordFault(FC_NO_FEEDBACK, SEV_ERROR);
         // re-attempt one more pulse
         actuator_pulseOff();
         s_phaseStart = millis();
         break;
       }
-      if (since > settings().currentOffMs && current) {
+      if (!settings().bypassCurrentSense && since > settings().currentOffMs && sensors_currentPresent()) {
         recordFault(FC_STUCK_PUMP, SEV_PANIC);
         enterState(ST_FAULT_LATCHED);
         break;
       }
-      if (since > settings().flowOffMs && flow) {
+      if (!settings().bypassFlowSense && since > settings().flowOffMs && sensors_flowLpmX10() >= DEF_MIN_LPM_X10) {
         recordFault(FC_STUCK_PUMP, SEV_PANIC);
         enterState(ST_FAULT_LATCHED);
         break;

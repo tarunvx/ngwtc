@@ -27,7 +27,7 @@
 #define MONITOR_ONLY_MODE      1
 //  Even in MONITOR_ONLY_MODE, allow MANUAL pump pulses? (set 0 to fully
 //  disable any solenoid pulse from firmware).
-#define ALLOW_MANUAL_ACTUATION 0
+#define ALLOW_MANUAL_ACTUATION 1
 
 // ---- Level source -----------------------------------------
 enum LevelSource {

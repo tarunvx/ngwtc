@@ -12,23 +12,24 @@ static volatile PulseState s_state = PULSE_IDLE;
 static uint32_t s_pulseStart = 0;
 static uint32_t s_pulseDur   = 0;
 
-static void allLow() {
-  digitalWrite(PIN_RELAY_ON,  LOW);
-  digitalWrite(PIN_RELAY_OFF, LOW);
+// Idle state: both pins HIGH (active-LOW relay modules — HIGH = coil off, no current draw)
+static void allIdle() {
+  digitalWrite(PIN_RELAY_ON,  HIGH);
+  digitalWrite(PIN_RELAY_OFF, HIGH);
 }
 
 void actuator_init() {
   pinMode(PIN_RELAY_ON,  OUTPUT);
   pinMode(PIN_RELAY_OFF, OUTPUT);
-  allLow();
+  allIdle();
   // Defensive: re-issue OFF on every boot.
   actuator_pulseOff();
 }
 
 static void interlockCheck() {
-  // Hardware/software invariant — if both ever read HIGH, raise fault.
-  if (digitalRead(PIN_RELAY_ON) == HIGH && digitalRead(PIN_RELAY_OFF) == HIGH) {
-    allLow();
+  // Hardware/software invariant — if both ever read LOW (both relays energized), raise fault.
+  if (digitalRead(PIN_RELAY_ON) == LOW && digitalRead(PIN_RELAY_OFF) == LOW) {
+    allIdle();
     Event e{}; e.type = EV_FAULT;
     e.p.fault = { FC_INTERLOCK_VIOLATION, SEV_PANIC };
     sendEvent(e);
@@ -41,8 +42,8 @@ void actuator_pulseOn() {
   Serial.printf("%s pulseON SUPPRESSED (monitor-only)\n", LOG_TAG_ACT);
   return;
 #endif
-  digitalWrite(PIN_RELAY_OFF, LOW);             // explicit interlock
-  digitalWrite(PIN_RELAY_ON,  HIGH);
+  digitalWrite(PIN_RELAY_OFF, HIGH);            // explicit interlock (de-energize OFF)
+  digitalWrite(PIN_RELAY_ON,  LOW);             // energize ON relay
   s_pulseStart = millis();
   s_pulseDur   = settings().pulseOnMs;
   s_state      = PULSE_ON_ACTIVE;
@@ -55,8 +56,8 @@ void actuator_pulseOff() {
   Serial.printf("%s pulseOFF SUPPRESSED (monitor-only)\n", LOG_TAG_ACT);
   return;
 #endif
-  digitalWrite(PIN_RELAY_ON,  LOW);
-  digitalWrite(PIN_RELAY_OFF, HIGH);
+  digitalWrite(PIN_RELAY_ON,  HIGH);            // de-energize ON relay
+  digitalWrite(PIN_RELAY_OFF, LOW);             // energize OFF relay
   s_pulseStart = millis();
   s_pulseDur   = settings().pulseOffMs;
   s_state      = PULSE_OFF_ACTIVE;
@@ -67,13 +68,13 @@ void actuator_tick() {
   if (s_state == PULSE_IDLE) return;
   interlockCheck();
   if (elapsed(s_pulseStart, s_pulseDur)) {
-    allLow();
+    allIdle();
     s_state = PULSE_IDLE;
   }
 }
 
 void actuator_panicOff() {
-  allLow();
+  allIdle();
   s_state = PULSE_IDLE;
   // re-issue OFF pulse to be sure
   actuator_pulseOff();

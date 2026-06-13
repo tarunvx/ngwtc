@@ -29,6 +29,12 @@ static uint32_t s_flowLastAggMs = 0;
 static uint32_t s_flowTotalPulses = 0;
 static uint16_t s_lpmX10 = 0;
 
+// Moving average buffer for flow smoothing
+#define FLOW_AVG_MAX 8
+static uint16_t s_flowHistory[FLOW_AVG_MAX] = {0};
+static uint8_t  s_flowHistIdx = 0;
+static uint16_t s_flowSmoothed = 0;  // smoothed lpm_x10
+
 // ============== float resolver =============
 static uint8_t s_lastLevel = 0;
 static bool    s_levelPlausible = true;
@@ -129,13 +135,25 @@ void sensors_tick() {
   // ---- DHT22 (every 2s — sensor minimum interval) ----
 #if HAS_DHT22
   static uint32_t lastDht = 0;
-  if (elapsed(lastDht, 2000)) {
+  static uint8_t  dhtFails = 0;
+  if (elapsed(lastDht, 2500)) {  // 2.5s to give sensor extra recovery time
     lastDht = millis();
-    float h = dht.readHumidity();
-    float t = dht.readTemperature();
-    if (!isnan(h) && !isnan(t)) {
-      s_tempCx10 = (int16_t)(t * 10.0f);
-      s_rhX10    = (uint16_t)(h * 10.0f);
+    // DHT22 is timing-sensitive; retry up to 3 times
+    for (uint8_t attempt = 0; attempt < 3; attempt++) {
+      float h = dht.readHumidity();
+      float t = dht.readTemperature();
+      if (!isnan(h) && !isnan(t)) {
+        s_tempCx10 = (int16_t)(t * 10.0f);
+        s_rhX10    = (uint16_t)(h * 10.0f);
+        dhtFails = 0;
+        break;
+      }
+      delayMicroseconds(100);  // brief gap before retry
+    }
+    if (dhtFails < 255) dhtFails++;
+    // Log persistent failures (first 5 only to avoid spam)
+    if (dhtFails == 5) {
+      Serial.println(F("[SEN] DHT22: persistent read failures"));
     }
   }
 #endif
@@ -192,13 +210,30 @@ void sensors_tick() {
     uint32_t p = s_flowPulses;
     s_flowPulses = 0;
     interrupts();
+
     s_flowTotalPulses += p;
     // pulses/sec → L/min: LPM = pps * 60 / (pulses_per_L)
     // pulses_per_L = flowKppl/100
     uint32_t lpm_x10 = (p * 60UL * 1000UL) / settings().flowKppl;  // *10 inherently
     s_lpmX10 = (uint16_t)lpm_x10;
+
+    // Moving average smoothing
+    uint8_t nSamples = settings().flowAvgSamples;
+    if (nSamples < 1) nSamples = 1;
+    if (nSamples > FLOW_AVG_MAX) nSamples = FLOW_AVG_MAX;
+    s_flowHistory[s_flowHistIdx % nSamples] = s_lpmX10;
+    s_flowHistIdx++;
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < nSamples; i++) sum += s_flowHistory[i];
+    s_flowSmoothed = (uint16_t)(sum / nSamples);
+
+    // Apply no-flow threshold: if below threshold, report 0
+    if (s_flowSmoothed < settings().flowNoFlowThresh) {
+      s_flowSmoothed = 0;
+    }
+
     Event e{}; e.type = EV_FLOW_TICK;
-    e.p.flow.lpm_x10 = s_lpmX10;
+    e.p.flow.lpm_x10 = s_flowSmoothed;
     e.p.flow.totalL_x10 = (uint32_t)((uint64_t)s_flowTotalPulses * 1000UL / settings().flowKppl);
     sendEvent(e);
   }
@@ -208,7 +243,7 @@ void sensors_tick() {
 uint8_t  sensors_levelPct()       { return s_lastLevel; }
 bool     sensors_currentPresent() { return s_currentPresent; }
 uint16_t sensors_currentMv()      { return s_lastCurrentMv; }
-uint16_t sensors_flowLpmX10()     { return s_lpmX10; }
+uint16_t sensors_flowLpmX10()     { return s_flowSmoothed; }  // smoothed + thresholded
 uint32_t sensors_totalLitersX10() { return (uint32_t)((uint64_t)s_flowTotalPulses * 1000UL / settings().flowKppl); }
 bool     sensors_fbOn()           { return s_fbOn; }
 bool     sensors_fbOff()          { return s_fbOff; }
