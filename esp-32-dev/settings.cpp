@@ -32,6 +32,11 @@ static void loadDefaults() {
   s_cfg.levelSource     = DEFAULT_LEVEL_SOURCE;
   s_cfg.pressureEmptyMPa1000 = 0;     // 0 MPa = empty
   s_cfg.pressureFullMPa1000  = 100;   // 0.100 MPa = full (adjust per install)
+  s_cfg.bypassCurrentSense   = false;
+  s_cfg.bypassFlowSense      = false;
+  s_cfg.bypassFeedback       = false;
+  s_cfg.flowNoFlowThresh     = 20;  // 2.0 L/min — filters EMI noise on long cables
+  s_cfg.flowAvgSamples       = 4;
   s_cfg.magic           = MAGIC;
 }
 
@@ -97,7 +102,8 @@ bool settings_setU16(const char* k, uint16_t v) {
     || _matchU16(k, "ctOffsetMv", s_cfg.ctOffsetMv, v)
     || _matchU16(k, "ctThreshMv", s_cfg.ctThreshMv, v)
     || _matchU16(k, "pressureEmptyMPa1000", s_cfg.pressureEmptyMPa1000, v)
-    || _matchU16(k, "pressureFullMPa1000",  s_cfg.pressureFullMPa1000,  v);
+    || _matchU16(k, "pressureFullMPa1000",  s_cfg.pressureFullMPa1000,  v)
+    || _matchU16(k, "flowNoFlowThresh",     s_cfg.flowNoFlowThresh,     v);
   if (ok) settings_save();
   return ok;
 }
@@ -108,7 +114,8 @@ bool settings_setU8(const char* k, uint8_t v) {
     || _matchU8(k, "mode",         s_cfg.mode,         v)
     || _matchU8(k, "levelSource",  s_cfg.levelSource,  v)
     || _matchU8(k, "cutoffMinPct", s_cfg.cutoffMinPct, v)
-    || _matchU8(k, "cutoffMaxPct", s_cfg.cutoffMaxPct, v);
+    || _matchU8(k, "cutoffMaxPct", s_cfg.cutoffMaxPct, v)
+    || _matchU8(k, "flowAvgSamples", s_cfg.flowAvgSamples, v);
   if (ok) settings_save();
   return ok;
 }
@@ -118,7 +125,10 @@ bool settings_setBool(const char* k, bool v) {
        _matchBool(k, "sleepMode",      s_cfg.sleepMode,      v)
     || _matchBool(k, "hwTimerPresent", s_cfg.hwTimerPresent, v)
     || _matchBool(k, "adaptiveDryRun", s_cfg.adaptiveDryRun, v)
-    || _matchBool(k, "mcuUpsPresent",  s_cfg.mcuUpsPresent,  v);
+    || _matchBool(k, "mcuUpsPresent",  s_cfg.mcuUpsPresent,  v)
+    || _matchBool(k, "bypassCurrentSense", s_cfg.bypassCurrentSense, v)
+    || _matchBool(k, "bypassFlowSense",    s_cfg.bypassFlowSense,    v)
+    || _matchBool(k, "bypassFeedback",     s_cfg.bypassFeedback,     v);
   if (ok) settings_save();
   return ok;
 }

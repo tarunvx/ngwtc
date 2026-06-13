@@ -41,7 +41,7 @@
 
 // NeoPixel data
 #define PIN_NEOPIXEL      5
-#define NEO_COUNT         10
+#define NEO_COUNT         9
 
 // I2C (OLED)
 #define PIN_I2C_SDA      21

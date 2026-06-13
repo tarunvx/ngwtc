@@ -1,6 +1,6 @@
 /*
 
-  Project - Smart Water Tank Monitor & Controller v5.0
+  Project - Smart Water Tank Monitor & Controller v5.1
 
   Author: Tarun Vishwakarma
 
@@ -34,10 +34,14 @@ static void initNTP() {
 void setup() {
 
   Serial.begin(115200);
-  delay(200);
+  delay(500);  // allow USB-CDC to enumerate
   Serial.println();
-
-  Serial.println(F("=== SWTC v5.0 boot ==="));
+  Serial.println();
+  Serial.println(F("================================"));
+  Serial.println(F("=== SWTC v5.1 boot ==="));
+  Serial.println(F("=== Baud: 115200 ==="));
+  Serial.println(F("================================"));
+  Serial.flush();
 
   settings_init();
   faultlog_init();

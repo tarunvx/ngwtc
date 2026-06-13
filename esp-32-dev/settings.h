@@ -40,6 +40,15 @@ struct Settings {
   uint16_t pressureEmptyMPa1000;  // pressure reading when tank empty (0%)
   uint16_t pressureFullMPa1000;   // pressure reading when tank full (100%)
 
+  // Sensor bypass flags (for unreliable sensors during bring-up)
+  bool     bypassCurrentSense;    // skip current-sense checks during actuation
+  bool     bypassFlowSense;       // skip flow-sense checks during actuation
+  bool     bypassFeedback;        // skip feedback micro-switch checks during actuation
+
+  // Flow sensor tuning
+  uint16_t flowNoFlowThresh;      // lpm_x10 below this = "no flow" (default 5 = 0.5 L/min)
+  uint8_t  flowAvgSamples;        // number of 1-second samples to average (default 4)
+
   uint16_t magic;           // sanity
 };
 

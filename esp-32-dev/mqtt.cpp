@@ -16,6 +16,7 @@
   static Adafruit_MQTT_Client  s_mqtt(&s_wifi, MQTT_HOST, MQTT_PORT, MQTT_USER, MQTT_KEY);
   static Adafruit_MQTT_Publish   s_pubStatus(&s_mqtt, MQTT_FEED_BASE "/next-gen-water-tank-controller.swtc-slash-status");
   static Adafruit_MQTT_Publish   s_pubAck   (&s_mqtt, MQTT_FEED_BASE "/next-gen-water-tank-controller.swtc-slash-ack");
+  static Adafruit_MQTT_Publish   s_pubLevel (&s_mqtt, MQTT_FEED_BASE "/next-gen-water-tank-controller.swtc-slash-level");
   static Adafruit_MQTT_Subscribe s_subCmd   (&s_mqtt, MQTT_FEED_BASE "/next-gen-water-tank-controller.swtc-slash-cmd");
 
   static uint32_t s_lastConnectTry = 0;
@@ -49,25 +50,45 @@ bool mqtt_dispatchCmd(const char* line) {
 
   if (strcmp(dom, "PUMP") == 0) {
     if (strcmp(act, "ON") == 0) {
-      // optional TIMER:<min>
+#if MONITOR_ONLY_MODE && !ALLOW_MANUAL_ACTUATION
+      mqtt_publishAck(id, false, "MONITOR_ONLY"); return true;
+#endif
+      // If in SLEEP, wake up first
       if (settings().sleepMode || sm_state() == ST_SLEEP) {
-        mqtt_publishAck(id, false, "SLEEP_MODE"); return true;
+        settings_setBool("sleepMode", false);
+        // Give state machine a tick to transition SLEEP→IDLE
+        Event we{}; we.type = EV_MODE_REQ; we.p.i32 = MODE_MANUAL;
+        sendEvent(we);
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
+      if (sm_isPumpRunningState(sm_state()) || sm_state() == ST_STARTING) {
+        mqtt_publishAck(id, false, "ALREADY_RUNNING"); return true;
+      }
+      if (sm_state() != ST_IDLE) {
+        mqtt_publishAck(id, false, "NOT_IDLE"); return true;
       }
       if (n >= 6 && strcmp(tokens[4], "TIMER") == 0) {
         uint32_t mins = atoi(tokens[5]);
         settings_setU32("timer1Ms", mins * 60000UL);
+        // Simulate timer button press → state machine handles STARTING
         e.type = EV_BUTTON; e.p.btn = { BTN2, PRESS_SHORT };
       } else {
-        e.type = EV_BUTTON; e.p.btn = { BTN1, PRESS_LONG };  // toggle to manual
+        // Switch to MANUAL mode and start pump
+        e.type = EV_BUTTON; e.p.btn = { BTN1, PRESS_LONG };
       }
       sendEvent(e);
       mqtt_publishAck(id, true, "OK");
       return true;
     }
     if (strcmp(act, "OFF") == 0) {
-      e.type = EV_BUTTON; e.p.btn = { BTN3, PRESS_LONG };
-      sendEvent(e);
-      mqtt_publishAck(id, true, "OK");
+      // Hard stop regardless of state
+      if (sm_isPumpRunningState(sm_state()) || sm_state() == ST_STARTING) {
+        e.type = EV_BUTTON; e.p.btn = { BTN3, PRESS_LONG };
+        sendEvent(e);
+        mqtt_publishAck(id, true, "OK");
+      } else {
+        mqtt_publishAck(id, true, "NOT_RUNNING");
+      }
       return true;
     }
     mqtt_publishAck(id, false, "UNKNOWN_ACTION"); return true;
@@ -144,20 +165,29 @@ void mqtt_publishAck(uint16_t id, bool ok, const char* msg) {
 }
 
 void mqtt_publishStatus() {
-  char json[384];
+  char json[512];
   snprintf(json, sizeof(json),
     "{\"online\":true,\"mode\":\"%s\",\"state\":\"%s\",\"sleep\":%s,"
     "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"faults\":%u,"
-    "\"temp_cx10\":%d,\"rh_x10\":%u,\"pressure_mpa\":%d}",
+    "\"temp_cx10\":%d,\"rh_x10\":%u,\"pressure_mpa\":%d,"
+    "\"bypass_i\":%s,\"bypass_f\":%s}",
     modeName(settings().mode), sm_stateName(sm_state()),
     settings().sleepMode ? "true" : "false",
     sensors_levelPct(), sensors_flowLpmX10(),
     sensors_currentMv(), (unsigned)faultlog_count(),
     (int)sensors_tempCx10(), (unsigned)sensors_rhX10(),
-    (int)(sensors_pressureMPa() * 1000));  // mPa integer for JSON simplicity
+    (int)(sensors_pressureMPa() * 1000),  // mPa integer for JSON simplicity
+    settings().bypassCurrentSense ? "true" : "false",
+    settings().bypassFlowSense ? "true" : "false");
   Serial.printf("%s STATUS %s\n", LOG_TAG_MQ, json);
 #if HAS_MQTT
-  if (s_mqtt.connected()) s_pubStatus.publish(json);
+  if (s_mqtt.connected()) {
+    s_pubStatus.publish(json);
+    // Publish level to dedicated topic (for cross-system tank level sharing)
+    char lvlBuf[8];
+    snprintf(lvlBuf, sizeof(lvlBuf), "%u", sensors_levelPct());
+    s_pubLevel.publish(lvlBuf);
+  }
 #endif
 }
 

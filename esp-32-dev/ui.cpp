@@ -22,8 +22,18 @@ static bool     s_uiDirty = true;
 // Popup overlay
 static char     s_popup[32] = {0};
 static uint32_t s_popupUntil = 0;
+// Operating screen toggle
+static bool     s_opScreen = false;       // auto-enters when pump runs
+static bool     s_opScreenForced = false; // user forced home while running
 
 void ui_requestUpdate() { s_uiDirty = true; }
+
+void ui_toggleOpScreen() {
+  s_opScreenForced = !s_opScreenForced;
+  s_uiDirty = true;
+}
+
+bool ui_isOpScreen() { return s_opScreen && !s_opScreenForced; }
 
 void ui_showPopup(const char* msg, uint16_t durationMs) {
   strncpy(s_popup, msg, sizeof(s_popup)-1);
@@ -76,9 +86,10 @@ void ui_tick() {
     s_uiDirty = true;
   }
 
-  // Refresh on events or every 5s (balance between OLED life and live readings)
+  // Refresh on events or periodically (2s during pump, 5s idle)
   uint32_t now = millis();
-  if (!s_uiDirty && (now - s_lastUiUpdate < 5000)) return;
+  uint32_t refreshInterval = (sm_isPumpRunningState(sm_state()) || sm_state() == ST_STARTING) ? 2000 : 5000;
+  if (!s_uiDirty && (now - s_lastUiUpdate < refreshInterval)) return;
   s_lastUiUpdate = now;
   s_uiDirty = false;
 
@@ -133,6 +144,60 @@ void ui_tick() {
       uint8_t idx = start + i;
       oled.printf("%c %s\n", idx == sel ? '>' : ' ', menu_itemLabel(idx));
     }
+    oled.display();
+    return;
+  }
+
+  // ---- Operating screen (auto-enters when pump is running) ----
+  SystemState curSt = sm_state();
+  bool pumpActive = sm_isPumpRunningState(curSt) || curSt == ST_STARTING || curSt == ST_STOPPING;
+  s_opScreen = pumpActive;
+
+  // Reset forced-home flag when pump stops
+  if (!pumpActive) s_opScreenForced = false;
+
+  if (pumpActive && !s_opScreenForced) {
+    // Operating screen: big font, essential info only
+    uint32_t runtime = sinceMs(sm_pumpStartedAt());
+    uint32_t rSec = runtime / 1000;
+    uint32_t rMin = rSec / 60;
+    rSec %= 60;
+
+    // Row 0 (y=0): STATE + runtime (font 2)
+    oled.setTextSize(2);
+    oled.setTextColor(WHITE);
+    oled.setCursor(0, 0);
+    const char* sn = sm_stateName(curSt);
+    char sn5[6]; strncpy(sn5, sn, 5); sn5[5] = 0;
+    oled.print(sn5);
+    // Runtime at right
+    char rtBuf[8];
+    snprintf(rtBuf, sizeof(rtBuf), "%lu:%02lu", (unsigned long)rMin, (unsigned long)rSec);
+    oled.setCursor(128 - (strlen(rtBuf) * 12), 0);
+    oled.print(rtBuf);
+
+    // Row 1 (y=18): Level (big)
+    oled.setTextSize(2);
+    oled.setCursor(0, 18);
+    oled.printf("LVL: %3u%%", sensors_levelPct());
+
+    // Row 2 (y=36): Flow (L/min, integer) + Current
+    oled.setCursor(0, 36);
+    uint16_t fl = sensors_flowLpmX10();
+    oled.printf("F:%u.%uL", fl/10, fl%10);
+    oled.setCursor(76, 36);
+    oled.printf("I:%umV", sensors_currentMv());
+
+    // Row 3 (y=54): Bypass warnings (font 1)
+    oled.setTextSize(1);
+    oled.setCursor(0, 56);
+    bool bI = settings().bypassCurrentSense;
+    bool bF = settings().bypassFlowSense;
+    if (bI && bF)      oled.print("!! I+F BYPASSED !!");
+    else if (bI)       oled.print("!! I-SENSE BYPASS !!");
+    else if (bF)       oled.print("!! FLOW BYPASS !!");
+    else               oled.print("B1:Home  B3L:STOP");
+
     oled.display();
     return;
   }
