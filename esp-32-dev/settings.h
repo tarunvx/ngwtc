@@ -45,6 +45,9 @@ struct Settings {
   bool     bypassFlowSense;       // skip flow-sense checks during actuation
   bool     bypassFeedback;        // skip feedback micro-switch checks during actuation
 
+  // Smart-Sense: auto-detect external pump/filling activity
+  bool     smartSense;            // when true, monitor sensors for external activity
+
   // Flow sensor tuning
   uint16_t flowNoFlowThresh;      // lpm_x10 below this = "no flow" (default 5 = 0.5 L/min)
   uint8_t  flowAvgSamples;        // number of 1-second samples to average (default 4)

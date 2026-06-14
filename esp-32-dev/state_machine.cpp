@@ -249,6 +249,12 @@ void sm_handleEvent(const Event& e) {
 
     case EV_FB_ON:
       if (s_state == ST_STARTING && e.p.boolean) s_sawFb = true;
+      // Smart-Sense: feedback switch pressed externally while IDLE
+      if (s_state == ST_IDLE && e.p.boolean && settings().smartSense && !settings().bypassFeedback) {
+        Serial.printf("%s SMART-SENSE: feedback detected, entering monitoring\n", LOG_TAG_SM);
+        enterState(ST_MANUAL_ON);  // enter running state for monitoring
+        ui_requestUpdate();
+      }
       return;
 
     case EV_FB_OFF:
@@ -265,11 +271,27 @@ void sm_handleEvent(const Event& e) {
           enterState(ST_STOPPING);
         }
       }
+      // Smart-Sense: current detected externally while IDLE
+      else if (s_state == ST_IDLE && e.p.boolean && settings().smartSense && !settings().bypassCurrentSense) {
+        Serial.printf("%s SMART-SENSE: current detected, entering monitoring\n", LOG_TAG_SM);
+        enterState(ST_MANUAL_ON);
+        s_pumpStartedAt = millis();
+        ui_requestUpdate();
+      }
       return;
 
     case EV_FLOW_TICK:
       if (s_state == ST_STARTING && e.p.flow.lpm_x10 >= DEF_MIN_LPM_X10) s_sawFlow = true;
       else if (s_state == ST_STOPPING && e.p.flow.lpm_x10 < DEF_MIN_LPM_X10) s_sawFlow = true;
+      // Smart-Sense: flow detected externally while IDLE
+      else if (s_state == ST_IDLE && e.p.flow.lpm_x10 >= settings().flowNoFlowThresh
+               && settings().smartSense && !settings().bypassFlowSense) {
+        Serial.printf("%s SMART-SENSE: flow detected (%u x0.1 lpm), entering monitoring\n",
+          LOG_TAG_SM, e.p.flow.lpm_x10);
+        enterState(ST_MANUAL_ON);
+        s_pumpStartedAt = millis();
+        ui_requestUpdate();
+      }
       return;
 
     case EV_TIMER_EXPIRED:

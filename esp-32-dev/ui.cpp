@@ -181,12 +181,13 @@ void ui_tick() {
     oled.setCursor(0, 18);
     oled.printf("LVL: %3u%%", sensors_levelPct());
 
-    // Row 2 (y=36): Flow (L/min, integer) + Current
+    // Row 2 (y=36): Flow (L/min) + Current (Volts)
     oled.setCursor(0, 36);
     uint16_t fl = sensors_flowLpmX10();
-    oled.printf("F:%u.%uL", fl/10, fl%10);
+    uint16_t imv = sensors_currentMv();
+    oled.printf("F:%u.%02uL", fl/10, fl%10);
     oled.setCursor(76, 36);
-    oled.printf("I:%umV", sensors_currentMv());
+    oled.printf("I:%u.%02uV", imv/1000, (imv%1000)/10);
 
     // Row 3 (y=54): Bypass warnings (font 1)
     oled.setTextSize(1);
@@ -231,14 +232,14 @@ void ui_tick() {
   oled.setCursor(92, 16);
   oled.print(mn4);
 
-  // Row 3 (y=32): flow   current   pump
+  // Row 3 (y=32): flow (L/min) + current (Volts)
   oled.setCursor(0, 32);
   uint16_t fl = sensors_flowLpmX10();
-  oled.printf("%u.%uL", fl/10, fl%10);
-  oled.setCursor(60, 32);
-  oled.printf("%umV", sensors_currentMv());
-  oled.setCursor(104, 32);
-  oled.print(sensors_currentPresent() ? "ON" : "--");
+  uint16_t imv = sensors_currentMv();
+  // Format: x.xxL  x.xxV
+  oled.printf("%u.%02uL", fl/10, fl%10);
+  oled.setCursor(68, 32);
+  oled.printf("%u.%02uV", imv/1000, (imv%1000)/10);
 
   // Row 4 (y=48): temp + humidity (font 1 to fit both)
   oled.setTextSize(1);
