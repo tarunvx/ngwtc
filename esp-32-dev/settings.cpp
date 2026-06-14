@@ -35,6 +35,7 @@ static void loadDefaults() {
   s_cfg.bypassCurrentSense   = false;
   s_cfg.bypassFlowSense      = false;
   s_cfg.bypassFeedback       = false;
+  s_cfg.smartSense           = true;   // auto-detect external filling by default
   s_cfg.flowNoFlowThresh     = 20;  // 2.0 L/min — filters EMI noise on long cables
   s_cfg.flowAvgSamples       = 4;
   s_cfg.magic           = MAGIC;
@@ -128,7 +129,8 @@ bool settings_setBool(const char* k, bool v) {
     || _matchBool(k, "mcuUpsPresent",  s_cfg.mcuUpsPresent,  v)
     || _matchBool(k, "bypassCurrentSense", s_cfg.bypassCurrentSense, v)
     || _matchBool(k, "bypassFlowSense",    s_cfg.bypassFlowSense,    v)
-    || _matchBool(k, "bypassFeedback",     s_cfg.bypassFeedback,     v);
+    || _matchBool(k, "bypassFeedback",     s_cfg.bypassFeedback,     v)
+    || _matchBool(k, "smartSense",         s_cfg.smartSense,         v);
   if (ok) settings_save();
   return ok;
 }

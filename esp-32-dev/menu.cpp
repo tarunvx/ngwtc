@@ -20,6 +20,7 @@ enum MenuItem : uint8_t {
   MI_MODE_MANUAL,
   MI_MODE_TIMER,
   MI_SLEEP_TOGGLE,
+  MI_SMART_SENSE,
   MI_BYPASS_CURRENT,
   MI_BYPASS_FLOW,
   MI_BYPASS_FEEDBACK,
@@ -49,6 +50,7 @@ static const char* kLabels[MI_COUNT] = {
   "Mode: MANUAL",
   "Mode: TIMER",
   "Toggle SLEEP",
+  "Smart-Sense",
   "Bypass I-Sense",
   "Bypass Flow",
   "Bypass Feedback",
@@ -160,6 +162,12 @@ static void activate() {
       e.p.i32 = now ? MODE_SLEEP : MODE_AUTO;
       sendEvent(e);
       ui_showPopup(now ? "SLEEP: ON" : "SLEEP: OFF");
+      break;
+    }
+    case MI_SMART_SENSE: {
+      bool now = !settings().smartSense;
+      settings_setBool("smartSense", now);
+      ui_showPopup(now ? "SmartSns: ON" : "SmartSns: OFF");
       break;
     }
     case MI_BYPASS_CURRENT: {
