@@ -14,3 +14,5 @@ build/
 .vscode/
 .idea/
 Thumbs.db
+
+.github/

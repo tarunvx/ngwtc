@@ -9,6 +9,7 @@
 #include "menu.h"
 #include "ui.h"
 #include "buzzer.h"
+#include "link.h"   // v6: link liveness gates AUTO + forces safe-stop
 
 static SystemState s_state = ST_BOOT_SELFTEST;
 static SystemState s_prev  = ST_BOOT_SELFTEST;
@@ -87,6 +88,17 @@ static bool overflowAllowedNow() {
   return true;
 }
 
+// v6: a pump start is only safe when the tank node's telemetry is live —
+// without it we have neither level (overflow protection) nor flow (dry-run
+// detection). Refuse all starts (AUTO, MANUAL, TIMER) while the link is down.
+static bool canStartPump() {
+  if (!link_alive()) {
+    Serial.printf("%s start refused — link down (no level/flow)\n", LOG_TAG_SM);
+    return false;
+  }
+  return true;
+}
+
 void sm_clearLatched() {
   if (s_state == ST_FAULT_LATCHED || s_state == ST_ERROR) {
     s_state = ST_IDLE; s_enteredAt = millis();
@@ -159,6 +171,33 @@ void sm_handleEvent(const Event& e) {
 
     case EV_FAULT:
       recordFault(e.p.fault.code, e.p.fault.severity);
+      return;
+
+    // ---- v6 wireless link ----
+    case EV_LINK_DOWN:
+      // Lost the tank node's sensor telemetry. Without floats/flow we are
+      // blind, so fail safe: stop any active pump and record the fault.
+      // AUTO restarts are blocked in sm_tick() while the link is down.
+      Serial.printf("%s LINK DOWN (age=%lums) — failing safe\n",
+        LOG_TAG_SM, (unsigned long)e.p.u32);
+      if (sm_isPumpRunningState(s_state) || s_state == ST_STARTING) {
+        recordFault(FC_LINK_LOST, SEV_ERROR);
+        enterState(ST_STOPPING);
+      } else {
+        // Log as a warning so it appears in the fault history even when idle.
+        FaultEntry fe{}; fe.ts = millis(); fe.state = (uint8_t)s_state;
+        fe.code = FC_LINK_LOST; fe.severity = SEV_WARN;
+        fe.levelPct = sensors_levelPct();
+        faultlog_record(fe);
+      }
+      ui_showPopup("TANK LINK LOST", 5000);
+      ui_requestUpdate();
+      return;
+
+    case EV_LINK_UP:
+      Serial.printf("%s LINK UP (seq=%lu)\n", LOG_TAG_SM, (unsigned long)e.p.u32);
+      ui_showPopup("TANK LINK OK", 2000);
+      ui_requestUpdate();
       return;
 
     case EV_SELFTEST_RESULT:
@@ -240,7 +279,7 @@ void sm_handleEvent(const Event& e) {
           // Clear sleep flag so IDLE tick doesn't push us back to SLEEP
           if (settings().sleepMode) settings_setBool("sleepMode", false);
 #if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
-          enterState(ST_STARTING);
+          if (canStartPump()) enterState(ST_STARTING);
 #else
           Serial.printf("%s MANUAL request ignored (monitor-only)\n", LOG_TAG_SM);
 #endif
@@ -257,10 +296,12 @@ void sm_handleEvent(const Event& e) {
         if (s_state != ST_IDLE && !(s_state == ST_FULL && s_overflowIgnore)) return;
         if (settings().sleepMode) settings_setBool("sleepMode", false);
 #if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
-        s_timerActive = true;
-        s_timerWhich = TMR_1;
-        s_timerDeadline = millis() + settings().timer1Ms;
-        enterState(ST_STARTING);
+        if (canStartPump()) {
+          s_timerActive = true;
+          s_timerWhich = TMR_1;
+          s_timerDeadline = millis() + settings().timer1Ms;
+          enterState(ST_STARTING);
+        }
 #else
         Serial.printf("%s TIMER1 ignored (monitor-only)\n", LOG_TAG_SM);
 #endif
@@ -269,10 +310,12 @@ void sm_handleEvent(const Event& e) {
         if (s_state != ST_IDLE && !(s_state == ST_FULL && s_overflowIgnore)) return;
         if (settings().sleepMode) settings_setBool("sleepMode", false);
 #if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
-        s_timerActive = true;
-        s_timerWhich = TMR_2;
-        s_timerDeadline = millis() + settings().timer2Ms;
-        enterState(ST_STARTING);
+        if (canStartPump()) {
+          s_timerActive = true;
+          s_timerWhich = TMR_2;
+          s_timerDeadline = millis() + settings().timer2Ms;
+          enterState(ST_STARTING);
+        }
 #else
         Serial.printf("%s TIMER2 ignored (monitor-only)\n", LOG_TAG_SM);
 #endif
@@ -300,10 +343,7 @@ void sm_handleEvent(const Event& e) {
       if (s_state == ST_IDLE && e.p.boolean && settings().smartSense && !settings().bypassFeedback) {
         Serial.printf("%s SMART-SENSE: feedback detected, entering monitoring\n", LOG_TAG_SM);
         enterState(ST_MANUAL_ON);  // enter running state for monitoring
-<<<<<<< HEAD
         s_pumpStartedAt = millis(); // anchor runtime/max-runtime to NOW (not boot)
-=======
->>>>>>> 5fd4b0b (version 5.1 improvements)
         ui_requestUpdate();
       }
       return;
@@ -332,17 +372,10 @@ void sm_handleEvent(const Event& e) {
       return;
 
     case EV_FLOW_TICK:
-<<<<<<< HEAD
       if (s_state == ST_STARTING && e.p.flow.lpm_x10 >= sensors_flowThreshX10()) s_sawFlow = true;
       else if (s_state == ST_STOPPING && e.p.flow.lpm_x10 < sensors_flowThreshX10()) s_sawFlow = true;
       // Smart-Sense: flow detected externally while IDLE
       else if (s_state == ST_IDLE && e.p.flow.lpm_x10 >= sensors_flowThreshX10()
-=======
-      if (s_state == ST_STARTING && e.p.flow.lpm_x10 >= DEF_MIN_LPM_X10) s_sawFlow = true;
-      else if (s_state == ST_STOPPING && e.p.flow.lpm_x10 < DEF_MIN_LPM_X10) s_sawFlow = true;
-      // Smart-Sense: flow detected externally while IDLE
-      else if (s_state == ST_IDLE && e.p.flow.lpm_x10 >= settings().flowNoFlowThresh
->>>>>>> 5fd4b0b (version 5.1 improvements)
                && settings().smartSense && !settings().bypassFlowSense) {
         Serial.printf("%s SMART-SENSE: flow detected (%u x0.1 lpm), entering monitoring\n",
           LOG_TAG_SM, e.p.flow.lpm_x10);
@@ -389,7 +422,8 @@ void sm_tick() {
     case ST_IDLE: {
       if (settings().sleepMode) { enterState(ST_SLEEP); break; }
 #if !MONITOR_ONLY_MODE
-      if (settings().mode == MODE_AUTO && sensors_levelPct() < 25) {
+      // v6: only auto-fill when the tank node link is live (canStartPump()).
+      if (settings().mode == MODE_AUTO && link_alive() && sensors_levelPct() < 25) {
         enterState(ST_STARTING);
       }
 #endif

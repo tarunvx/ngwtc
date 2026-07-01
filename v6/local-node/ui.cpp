@@ -7,6 +7,7 @@
 #include "time_utils.h"
 #include "mqtt.h"
 #include "menu.h"
+#include "link.h"
 
 #if HAS_OLED
   #include <Wire.h>
@@ -71,6 +72,22 @@ static void drawWifi(int x, int y, bool on) {
     oled.drawCircle(x+3, y,   6, WHITE);
   } else {
     // small X for disconnected
+    oled.drawLine(x, y, x+6, y+6, WHITE);
+    oled.drawLine(x+6, y, x, y+6, WHITE);
+  }
+#endif
+}
+
+// v6: tank-node ESP-NOW link indicator. Alive = small antenna; down = a
+// blinking X so a dropped link is impossible to miss at a glance.
+static void drawLink(int x, int y, bool alive) {
+#if HAS_OLED
+  if (alive) {
+    oled.drawLine(x+3, y, x+3, y+7, WHITE);   // mast
+    oled.drawLine(x+1, y+2, x+3, y, WHITE);   // left whisker
+    oled.drawLine(x+5, y+2, x+3, y, WHITE);   // right whisker
+    oled.drawPixel(x+3, y, WHITE);            // tip
+  } else if ((millis() / 400) % 2 == 0) {     // blink ~1.25 Hz
     oled.drawLine(x, y, x+6, y+6, WHITE);
     oled.drawLine(x+6, y, x, y+6, WHITE);
   }
@@ -218,7 +235,8 @@ void ui_tick() {
   char sn4[5]; strncpy(sn4, sn, 4); sn4[4] = 0;
   oled.setCursor(52, 0);
   oled.print(sn4);
-  // WiFi symbol at top-right
+  // Tank-node link indicator (left of WiFi), then WiFi symbol at top-right
+  drawLink(104, 0, link_alive());
   drawWifi(118, 0, WiFi.isConnected());
 
   // Row 2 (y=16): pressure   mode

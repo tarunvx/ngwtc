@@ -6,28 +6,23 @@
 #include "event_queue.h"
 #include "time_utils.h"
 #include "ui.h"
+#include "link.h"   // v6: floats/pressure/flow arrive over ESP-NOW
 
 #if HAS_DHT22
   #include <DHT.h>
   static DHT dht(PIN_DHT22, DHT22);
 #endif
 
-// ============== Pressure sensor ================
-#define PIN_PRESSURE_ADC 34
+// ============== Pressure sensor (v6: sourced from tank node) ====
 static float s_pressureMPa = 0.0f;
 
-// ============== flow ISR ===================
-#if HAS_FLOW_ISR
-static volatile uint32_t s_flowPulses = 0;
+// ============== Flow (v6: cumulative pulses from tank node) =====
+static uint32_t s_flowLastAggMs   = 0;
+static uint32_t s_flowTotalPulses = 0;   // mirrors tank-node cumulative count
+static uint32_t s_flowPrevTotal   = 0;   // previous cumulative for 1s delta
+static bool     s_flowPrimed      = false;
+static uint16_t s_lpmX10          = 0;
 
-static void IRAM_ATTR flowIsr() {
-  s_flowPulses++;
-}
-#endif
-
-static uint32_t s_flowLastAggMs = 0;
-static uint32_t s_flowTotalPulses = 0;
-static uint16_t s_lpmX10 = 0;
 
 // Moving average buffer for flow smoothing
 #define FLOW_AVG_MAX 8
@@ -51,18 +46,11 @@ static int16_t  s_tempCx10 = -9999;   // sentinel = no reading yet
 static uint16_t s_rhX10 = 0;
 
 void sensors_init() {
-  pinMode(PIN_FLOAT_25,  INPUT_PULLUP);
-  pinMode(PIN_FLOAT_50,  INPUT_PULLUP);
-  pinMode(PIN_FLOAT_75,  INPUT_PULLUP);
-  pinMode(PIN_FLOAT_100, INPUT_PULLUP);
-
+  // v6: floats, pressure and flow are NOT wired to this node anymore —
+  // they arrive over ESP-NOW from the tank node (see link.cpp). Only the
+  // pump-side sensors remain local: feedback micro-switches, CT clamp, DHT22.
   pinMode(PIN_FB_ON,  INPUT_PULLUP);
   pinMode(PIN_FB_OFF, INPUT_PULLUP);
-
-  pinMode(PIN_FLOW, INPUT_PULLUP);
-#if HAS_FLOW_ISR
-  attachInterrupt(digitalPinToInterrupt(PIN_FLOW), flowIsr, FALLING);
-#endif
 
 #if HAS_CT_CLAMP
   analogReadResolution(12);
@@ -74,27 +62,15 @@ void sensors_init() {
   Serial.println(F("[SEN] DHT22 init"));
 #endif
 
-  // Pressure sensor ADC (input-only pin, no setup needed beyond resolution)
-  analogReadResolution(12);
+  Serial.println(F("[SEN] v6: floats/pressure/flow sourced from tank node via link"));
 }
 
 static uint8_t readFloats() {
-  // Active LOW — water present grounds the input.
-  bool l25  = (digitalRead(PIN_FLOAT_25)  == LOW);
-  bool l50  = (digitalRead(PIN_FLOAT_50)  == LOW);
-  bool l75  = (digitalRead(PIN_FLOAT_75)  == LOW);
-  bool l100 = (digitalRead(PIN_FLOAT_100) == LOW);
-
-  // Plausibility: monotonic — if L100 high, all lower must be high.
-  s_levelPlausible = !((l100 && (!l75 || !l50 || !l25)) ||
-                       (l75  && (!l50 || !l25)) ||
-                       (l50  && !l25));
-
-  if (l100) return 100;
-  if (l75)  return 75;
-  if (l50)  return 50;
-  if (l25)  return 25;
-  return 0;
+  // v6: floats live on the tank node; the link layer resolves the
+  // active-LOW pattern into a level % and a monotonic plausibility flag
+  // (identical semantics to v5's local float wiring).
+  s_levelPlausible = link_levelPlausible();
+  return link_levelPct();
 }
 
 static uint16_t sampleCtRmsMv() {
@@ -117,15 +93,14 @@ static uint16_t sampleCtRmsMv() {
 }
 
 void sensors_tick() {
-  // ---- pressure sensor (every 1s) ----
+  // ---- pressure sensor (every 1s, sourced from tank node) ----
   static uint32_t lastPressure = 0;
   if (elapsed(lastPressure, 1000)) {
     lastPressure = millis();
-    int raw = analogRead(PIN_PRESSURE_ADC);
-    float v = raw * (3.3f / 4095.0f);
-    // Sensor: 0.5V = 0 MPa, 4.5V = 1 MPa
-    // Note: ESP32 ADC max is 3.3V, so with a voltage divider or
-    // attenuation you may need to scale. For now, direct 3.3V read.
+    // Tank node sends the sensor's NATIVE millivolts (e.g. 500..4500).
+    // Apply the SAME mapping as v5 so calibration semantics are unchanged:
+    //   0.5V = 0 MPa, 4.5V = 1 MPa  =>  mpa = (V - 0.5) * (1/4)
+    float v = link_pressureMv() / 1000.0f;
     float mpa = (v - 0.5f) * (1.0f / 4.0f);
     if (mpa < 0) mpa = 0;
     if (mpa > 1.2f) mpa = 1.2f;
@@ -159,11 +134,9 @@ void sensors_tick() {
 #endif
 
   // ---- level ----
-  // Floats are discrete (0/25/50/75/100), so emit on any change.
-  // (Previous code had a dead hysteresis guard whose `|| lvl != s_lastLevel`
-  // made the outer test always true — levelHystPct never gated anything.
-  // Simplified to a plain change-detect; hysteresis on discrete floats is a
-  // no-op anyway.)
+  // Floats are discrete (0/25/50/75/100), so emit on any change. (v5 had a
+  // dead hysteresis guard here that never actually gated anything — the
+  // `|| lvl != s_lastLevel` made the outer test always true. Simplified.)
   uint8_t lvl = readFloats();
   if (lvl != s_lastLevel) {
     s_lastLevel = lvl;
@@ -172,7 +145,9 @@ void sensors_tick() {
     ui_requestUpdate(); // Ensure UI updates immediately on level change
   }
 
-  if (!s_levelPlausible) {
+  // Only flag implausible level while the link is alive — a dead link would
+  // otherwise spam stale/zero float patterns. Link-loss is handled separately.
+  if (link_alive() && !s_levelPlausible) {
     Event e{}; e.type = EV_FAULT;
     e.p.fault = { FC_IMPLAUSIBLE_LEVEL, SEV_WARN };
     sendEvent(e);
@@ -205,16 +180,33 @@ void sensors_tick() {
     }
   }
 
-  // ---- flow aggregation ----
-#if HAS_FLOW_ISR
+  // ---- flow aggregation (v6: difference tank-node cumulative pulses) ----
+  // We diff the tank node's monotonic flowTotal once per second. Using the
+  // cumulative counter (instead of a per-packet count) means a dropped
+  // telemetry frame doesn't lose pulses — the next good frame still carries
+  // the full total. All downstream math/smoothing matches v5 exactly.
   if (elapsed(s_flowLastAggMs, 1000)) {
     s_flowLastAggMs = millis();
-    noInterrupts();
-    uint32_t p = s_flowPulses;
-    s_flowPulses = 0;
-    interrupts();
 
-    s_flowTotalPulses += p;
+    uint32_t total = link_flowTotalPulses();
+    uint32_t p = 0;
+
+    if (!link_alive()) {
+      // Link down: report no flow and resync the baseline so we don't emit a
+      // huge bogus delta when telemetry resumes.
+      s_flowPrimed = false;
+      p = 0;
+    } else if (!s_flowPrimed) {
+      // First good sample after boot/reconnect: establish baseline only.
+      s_flowPrevTotal = total;
+      s_flowPrimed = true;
+      p = 0;
+    } else {
+      p = total - s_flowPrevTotal;   // uint32 subtraction handles wrap
+      s_flowPrevTotal = total;
+    }
+    s_flowTotalPulses = total;
+
     // pulses/sec → L/min: LPM = pps * 60 / (pulses_per_L)
     // pulses_per_L = flowKppl/100
     uint32_t lpm_x10 = (p * 60UL * 1000UL) / settings().flowKppl;  // *10 inherently
@@ -240,7 +232,6 @@ void sensors_tick() {
     e.p.flow.totalL_x10 = (uint32_t)((uint64_t)s_flowTotalPulses * 1000UL / settings().flowKppl);
     sendEvent(e);
   }
-#endif
 }
 
 uint8_t  sensors_levelPct()       { return s_lastLevel; }

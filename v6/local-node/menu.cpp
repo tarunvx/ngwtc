@@ -21,10 +21,7 @@ enum MenuItem : uint8_t {
   MI_MODE_TIMER,
   MI_SLEEP_TOGGLE,
   MI_SMART_SENSE,
-<<<<<<< HEAD
   MI_OVERFLOW_ONCE,
-=======
->>>>>>> 5fd4b0b (version 5.1 improvements)
   MI_BYPASS_CURRENT,
   MI_BYPASS_FLOW,
   MI_BYPASS_FEEDBACK,
@@ -55,10 +52,7 @@ static const char* kLabels[MI_COUNT] = {
   "Mode: TIMER",
   "Toggle SLEEP",
   "Smart-Sense",
-<<<<<<< HEAD
   "Ignore Full 1x",
-=======
->>>>>>> 5fd4b0b (version 5.1 improvements)
   "Bypass I-Sense",
   "Bypass Flow",
   "Bypass Feedback",
@@ -178,7 +172,6 @@ static void activate() {
       ui_showPopup(now ? "SmartSns: ON" : "SmartSns: OFF");
       break;
     }
-<<<<<<< HEAD
     case MI_OVERFLOW_ONCE: {
       // One-shot: arm the overflow override so the next MANUAL/TIMER run may
       // run past full. Self-clears on stop / arm timeout. AUTO unaffected.
@@ -186,8 +179,6 @@ static void activate() {
       ui_showPopup(on ? "Overflow ARM 1x" : "Overflow OFF");
       break;
     }
-=======
->>>>>>> 5fd4b0b (version 5.1 improvements)
     case MI_BYPASS_CURRENT: {
       bool now = !settings().bypassCurrentSense;
       settings_setBool("bypassCurrentSense", now);

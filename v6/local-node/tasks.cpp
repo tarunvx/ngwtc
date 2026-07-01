@@ -11,6 +11,7 @@
 #include "led.h"
 #include "buzzer.h"
 #include "mqtt.h"
+#include "link.h"
 #include "selftest.h"
 #include "fault_log.h"
 #include "settings.h"
@@ -46,6 +47,7 @@ static void controlTask(void*) {
   Event e{};
   for (;;) {
     if (receiveEvent(e, 50)) sm_handleEvent(e);
+    link_tick();    // v6: detect tank-node link up/down, emit EV_LINK_*
     sm_tick();
     actuator_tick();
     esp_task_wdt_reset();

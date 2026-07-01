@@ -7,6 +7,7 @@
 #include "sensors.h"
 #include "fault_log.h"
 #include "time_utils.h"
+#include "link.h"
 
 #if HAS_MQTT
   #include <WiFi.h>
@@ -181,7 +182,8 @@ void mqtt_publishStatus() {
     "{\"online\":true,\"mode\":\"%s\",\"state\":\"%s\",\"sleep\":%s,"
     "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"faults\":%u,"
     "\"temp_cx10\":%d,\"rh_x10\":%u,\"pressure_mpa\":%d,"
-    "\"bypass_i\":%s,\"bypass_f\":%s,\"overflow\":%s}",
+    "\"bypass_i\":%s,\"bypass_f\":%s,\"overflow\":%s,"
+    "\"link\":%s,\"link_age_ms\":%lu,\"link_seq\":%u,\"link_drops\":%lu}",
     modeName(settings().mode), sm_stateName(sm_state()),
     settings().sleepMode ? "true" : "false",
     sensors_levelPct(), sensors_flowLpmX10(),
@@ -190,7 +192,10 @@ void mqtt_publishStatus() {
     (int)(sensors_pressureMPa() * 1000),  // mPa integer for JSON simplicity
     settings().bypassCurrentSense ? "true" : "false",
     settings().bypassFlowSense ? "true" : "false",
-    sm_overflowIgnore() ? "true" : "false");
+    sm_overflowIgnore() ? "true" : "false",
+    link_alive() ? "true" : "false",
+    (unsigned long)(link_everReceived() ? link_ageMs() : 0),
+    (unsigned)link_seq(), (unsigned long)link_dropCount());
   Serial.printf("%s STATUS %s\n", LOG_TAG_MQ, json);
 #if HAS_MQTT
   if (s_mqtt.connected()) {
@@ -226,6 +231,20 @@ static void connectIfNeeded() {
 
 void mqtt_tick() {
 #if HAS_MQTT
+  // One-time diagnostic: report the WiFi channel we associated on. ESP-NOW on
+  // the ESP32 follows the STA channel automatically, so this is the channel the
+  // tank node must match (its auto-discovery should land here). Handy for
+  // verifying the link during bring-up.
+  static bool s_loggedChannel = false;
+  if (!s_loggedChannel && WiFi.status() == WL_CONNECTED) {
+    s_loggedChannel = true;
+    Serial.printf("%s WiFi connected: SSID=%s ch=%d RSSI=%d IP=%s\n", LOG_TAG_MQ,
+      WiFi.SSID().c_str(), WiFi.channel(), WiFi.RSSI(),
+      WiFi.localIP().toString().c_str());
+    Serial.printf("%s -> tank node must broadcast on ESP-NOW channel %d\n",
+      LOG_TAG_MQ, WiFi.channel());
+  }
+
   connectIfNeeded();
   if (!s_mqtt.connected()) return;            // safety: never call into broker funcs while down
   Adafruit_MQTT_Subscribe* sub;
