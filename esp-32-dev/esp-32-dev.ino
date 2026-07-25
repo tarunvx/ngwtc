@@ -6,6 +6,8 @@
 
   Start - 19th April 2026
 
+  Version 5.2 - 25th July 2026
+
 */
 
 #include <Arduino.h> 
