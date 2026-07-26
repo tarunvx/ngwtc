@@ -51,8 +51,8 @@ control everything from the **front panel**, the **on-screen menu**, or
   and pump current.
 - The **light bar** shows the level at a glance (and blinks red if there's a
   problem).
-- The **beeper** chirps gently while the pump runs and sounds a steady tone when
-  the tank is full.
+- The **beeper** chirps gently while the pump runs and beeps steadily when the
+  tank is full.
 - If anything looks wrong (no water flow, no current, pump won't switch off),
   the system **stops the pump and tells you why**.
 - You can always take over **manually** — start, stop, or run for a fixed time.
@@ -229,8 +229,9 @@ On power-up the bar runs a quick **rainbow sweep** — that's just the startup t
 
 | Sound | Meaning |
 |---|---|
+| **A few short beeps at power-up** | Startup self-check (plays along with the light-bar rainbow). |
 | **Short chirp every 2 seconds** | Pump is running (a gentle "I'm on"). |
-| **Continuous tone** | **Tank is full.** Press **B1** to silence it. |
+| **Steady repeating beep** | **Tank is full.** Press **B1** to silence it. |
 | **Fast repeating beep** | An **error** occurred. |
 | **Urgent fast beep** | A **serious (latched) fault** — needs your attention. |
 | **One confirmation chirp** | You armed/disarmed the overflow override (long chirp = armed, short = off). |
@@ -554,10 +555,11 @@ usual.
 
 ```
  Chirp every 2s   = pump running
- Steady tone      = tank FULL (press B1 to silence)
+ Steady beep      = tank FULL (press B1 to silence)
  Fast beep        = error
  Urgent beep      = serious fault (needs you)
  Single chirp     = overflow override armed/disarmed
+ Beeps at power-up = startup self-check
 ```
 
 ### Modes

@@ -8,4 +8,5 @@ void buzzer_tick();
 void buzzer_silence();
 void buzzer_autoTick();   // maps system state -> pattern automatically
 void buzzer_chirp(uint16_t ms = 120);  // one-shot confirmation blip (overrides pattern briefly)
+void buzzer_beep(uint16_t onMs);       // BLOCKING beep — boot/setup only (before tasks start)
 #endif

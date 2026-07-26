@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "state_machine.h"
 #include "time_utils.h"
+#include "buzzer.h"
 
 #if HAS_NEOPIXEL
   #include <Adafruit_NeoPixel.h>
@@ -31,7 +32,10 @@ void led_init() {
       strip.setPixelColor(idx, strip.ColorHSV(hue, 255, bright));
     }
     strip.show();
-    delay(100);  // 100ms per LED × 10 LEDs = 1s for chase
+    // Startup chime: three short beeps rising with the chase. Boot-only — the
+    // buzzer task isn't running yet, so buzzer_beep() drives the pin directly.
+    if (i == 1 || i == 4 || i == 7) { buzzer_beep(60); delay(40); }
+    else delay(100);  // ~100 ms per LED so the chase still takes ~1 s
   }
   // Hold full rainbow briefly
   for (uint8_t i = 0; i < NEO_COUNT; i++) {
