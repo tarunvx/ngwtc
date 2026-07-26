@@ -23,7 +23,7 @@ struct Settings {
   uint32_t timer2Ms;
 
   // sensor cal
-  uint16_t flowKppl;        // pulses/L * 100
+  uint16_t flowKppl;        // pulses per litre (YF-S201 ≈ 450)
   uint16_t ctOffsetMv;
   uint16_t ctThreshMv;
   uint8_t  levelHystPct;

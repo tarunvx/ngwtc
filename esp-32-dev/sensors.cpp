@@ -215,9 +215,10 @@ void sensors_tick() {
     interrupts();
 
     s_flowTotalPulses += p;
-    // pulses/sec → L/min: LPM = pps * 60 / (pulses_per_L)
-    // pulses_per_L = flowKppl/100
-    uint32_t lpm_x10 = (p * 60UL * 1000UL) / settings().flowKppl;  // *10 inherently
+    // pulses/sec → L/min for a YF-S201: LPM = pps * 60 / pulses_per_litre,
+    // where flowKppl IS the pulses-per-litre calibration (YF-S201 ≈ 450, i.e.
+    // F = 7.5·Q). Scaled ×10 for the integer result: lpm_x10 = pps * 600 / flowKppl.
+    uint32_t lpm_x10 = (p * 60UL * 10UL) / settings().flowKppl;
     s_lpmX10 = (uint16_t)lpm_x10;
 
     // Moving average smoothing
@@ -237,7 +238,7 @@ void sensors_tick() {
 
     Event e{}; e.type = EV_FLOW_TICK;
     e.p.flow.lpm_x10 = s_flowSmoothed;
-    e.p.flow.totalL_x10 = (uint32_t)((uint64_t)s_flowTotalPulses * 1000UL / settings().flowKppl);
+    e.p.flow.totalL_x10 = (uint32_t)((uint64_t)s_flowTotalPulses * 10UL / settings().flowKppl);
     sendEvent(e);
   }
 #endif
@@ -252,7 +253,7 @@ uint16_t sensors_flowLpmX10()     { return s_flowSmoothed; }  // smoothed + thre
 // the "No-Flow Thr" menu item / MQTT). Floored to 1 (0.1 L/min) so a mis-set
 // zero can't make "flow present" evaluate true on noise.
 uint16_t sensors_flowThreshX10()  { uint16_t t = settings().flowNoFlowThresh; return t < 1 ? 1 : t; }
-uint32_t sensors_totalLitersX10() { return (uint32_t)((uint64_t)s_flowTotalPulses * 1000UL / settings().flowKppl); }
+uint32_t sensors_totalLitersX10() { return (uint32_t)((uint64_t)s_flowTotalPulses * 10UL / settings().flowKppl); }
 bool     sensors_fbOn()           { return s_fbOn; }
 bool     sensors_fbOff()          { return s_fbOff; }
 int16_t  sensors_tempCx10()       { return s_tempCx10; }

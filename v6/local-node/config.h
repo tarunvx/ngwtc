@@ -53,7 +53,7 @@ enum LevelSource {
 #define DEF_FAULT_REPEAT_LIMIT  3
 
 // ---- Sensor thresholds ------------------------------------
-#define DEF_FLOW_KPPL           450     // YF-S201 pulses/L * 100
+#define DEF_FLOW_KPPL           450     // YF-S201 pulses per litre (F=7.5·Q ⇒ 450)
 #define DEF_MIN_LPM_X10         5       // legacy floor; runtime "flow present" cutoff
                                         // is now NVS flowNoFlowThresh via
                                         // sensors_flowThreshX10() (this is only a default seed)

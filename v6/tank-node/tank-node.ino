@@ -97,7 +97,7 @@
 #define NOFLOW_PPS_FLOOR    1       // pulses/sec below this => not "active"
 
 // Pressure divider / ADC calibration (see header notes above)
-#define PRESS_DIVIDER_RATIO 0.667f  // R_bot/(R_top+R_bot)
+#define PRESS_DIVIDER_RATIO 0.667f  // R_bot/(R_top+R_bot); 10k/20k OR 15k/30k both ≈0.667 (bench-validated)
 #define PRESS_BOARD_VREF    3.3f    // full-scale volts at the A0 board pin
 #define PRESS_ADC_MAX       1023.0f // ESP8266 ADC is 10-bit
 
@@ -189,6 +189,8 @@ void setup() {
   pinMode(PIN_FLOAT_50,  INPUT_PULLUP);
   pinMode(PIN_FLOAT_75,  INPUT_PULLUP);
   pinMode(PIN_FLOAT_100, INPUT_PULLUP);
+  // YF-S201 flow signal is open-collector — add an EXTERNAL 10k pull-up to 3.3V
+  // (bench-validated: the internal pull-up alone is too weak for clean edges).
   pinMode(PIN_FLOW,      INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_FLOW), flowIsr, FALLING);
 
