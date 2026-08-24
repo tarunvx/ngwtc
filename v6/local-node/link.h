@@ -9,7 +9,7 @@
 //  Receives LinkTelemetry frames broadcast by the tank node, validates
 //  them (LINK_NET_ID + version + CRC16), and exposes the latest sensor
 //  snapshot to the rest of the firmware. The sensors module sources
-//  floats/pressure/flow from here instead of local GPIO.
+//  floats/level/flow from here instead of local GPIO.
 //
 //  Liveness: if no valid frame arrives within LINK_TIMEOUT_MS, the link
 //  is considered DOWN and link_tick() emits EV_LINK_DOWN (and EV_LINK_UP
@@ -30,7 +30,8 @@ uint32_t link_ageMs();          // ms since last valid frame (UINT32_MAX if none
 uint8_t  link_floatBits();      // LINK_FLOAT_* bitmap from tank node
 uint8_t  link_levelPct();       // resolved 0/25/50/75/100 (monotonic)
 bool     link_levelPlausible(); // false if float pattern non-monotonic
-uint16_t link_pressureMv();     // native sensor millivolts (500..4500)
+uint16_t link_distanceMm();     // ultrasonic air gap in mm (0 = no echo)
+uint8_t  link_usLevelPct();     // ultrasonic level 0..100% (mapped on tank node)
 uint32_t link_flowTotalPulses();// cumulative pulses since tank-node boot
 uint16_t link_seq();            // last sequence number
 uint32_t link_dropCount();      // detected sequence gaps (diagnostics)

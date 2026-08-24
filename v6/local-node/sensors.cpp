@@ -6,15 +6,16 @@
 #include "event_queue.h"
 #include "time_utils.h"
 #include "ui.h"
-#include "link.h"   // v6: floats/pressure/flow arrive over ESP-NOW
+#include "link.h"   // v6: floats/level/flow arrive over ESP-NOW
 
 #if HAS_DHT22
   #include <DHT.h>
   static DHT dht(PIN_DHT22, DHT22);
 #endif
 
-// ============== Pressure sensor (v6: sourced from tank node) ====
-static float s_pressureMPa = 0.0f;
+// ============== Ultrasonic level (v6: sourced from tank node) ====
+static uint16_t s_distanceMm = 0;
+static uint8_t  s_usLevelPct = 0;
 
 // ============== Flow (v6: cumulative pulses from tank node) =====
 static uint32_t s_flowLastAggMs   = 0;
@@ -46,7 +47,7 @@ static int16_t  s_tempCx10 = -9999;   // sentinel = no reading yet
 static uint16_t s_rhX10 = 0;
 
 void sensors_init() {
-  // v6: floats, pressure and flow are NOT wired to this node anymore —
+  // v6: floats, ultrasonic level and flow are NOT wired to this node anymore —
   // they arrive over ESP-NOW from the tank node (see link.cpp). Only the
   // pump-side sensors remain local: feedback micro-switches, CT clamp, DHT22.
   pinMode(PIN_FB_ON,  INPUT_PULLUP);
@@ -62,7 +63,7 @@ void sensors_init() {
   Serial.println(F("[SEN] DHT22 init"));
 #endif
 
-  Serial.println(F("[SEN] v6: floats/pressure/flow sourced from tank node via link"));
+  Serial.println(F("[SEN] v6: floats/level/flow sourced from tank node via link"));
 }
 
 static uint8_t readFloats() {
@@ -93,18 +94,14 @@ static uint16_t sampleCtRmsMv() {
 }
 
 void sensors_tick() {
-  // ---- pressure sensor (every 1s, sourced from tank node) ----
-  static uint32_t lastPressure = 0;
-  if (elapsed(lastPressure, 1000)) {
-    lastPressure = millis();
-    // Tank node sends the sensor's NATIVE millivolts (e.g. 500..4500).
-    // Apply the SAME mapping as v5 so calibration semantics are unchanged:
-    //   0.5V = 0 MPa, 4.5V = 1 MPa  =>  mpa = (V - 0.5) * (1/4)
-    float v = link_pressureMv() / 1000.0f;
-    float mpa = (v - 0.5f) * (1.0f / 4.0f);
-    if (mpa < 0) mpa = 0;
-    if (mpa > 1.2f) mpa = 1.2f;
-    s_pressureMPa = mpa;
+  // ---- ultrasonic level (every 1s, sourced from tank node) ----
+  // The tank node owns the distance->percent mapping (its two calibration
+  // constants), so we just mirror what it sends.
+  static uint32_t lastUs = 0;
+  if (elapsed(lastUs, 1000)) {
+    lastUs = millis();
+    s_distanceMm = link_distanceMm();
+    s_usLevelPct = link_usLevelPct();
   }
 
   // ---- DHT22 (every 2s — sensor minimum interval) ----
@@ -250,14 +247,5 @@ bool     sensors_fbOff()          { return s_fbOff; }
 int16_t  sensors_tempCx10()       { return s_tempCx10; }
 uint16_t sensors_rhX10()          { return s_rhX10; }
 bool     sensors_levelPlausible() { return s_levelPlausible; }
-float    sensors_pressureMPa()    { return s_pressureMPa; }
-
-uint8_t sensors_pressurePct() {
-  float emptyMPa = settings().pressureEmptyMPa1000 / 1000.0f;
-  float fullMPa  = settings().pressureFullMPa1000  / 1000.0f;
-  if (fullMPa <= emptyMPa) return 0;
-  float pct = (s_pressureMPa - emptyMPa) / (fullMPa - emptyMPa) * 100.0f;
-  if (pct < 0) pct = 0;
-  if (pct > 100) pct = 100;
-  return (uint8_t)pct;
-}
+uint16_t sensors_distanceMm()          { return s_distanceMm; }
+uint8_t  sensors_ultrasonicLevelPct()  { return s_usLevelPct; }

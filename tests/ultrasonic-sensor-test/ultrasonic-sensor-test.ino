@@ -63,6 +63,9 @@
 
 #include <Arduino.h>
 
+#define D1 5
+#define D2 4
+
 // ---- Pins (NodeMCU labels) ---------------------------------
 #define TRIG_PIN  D1    // GPIO5  -> sensor TRIG
 #define ECHO_PIN  D2    // GPIO4  <- sensor ECHO (through 1k/2k divider)

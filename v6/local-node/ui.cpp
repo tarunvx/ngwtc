@@ -239,12 +239,9 @@ void ui_tick() {
   drawLink(104, 0, link_alive());
   drawWifi(118, 0, WiFi.isConnected());
 
-  // Row 2 (y=16): pressure   mode
+  // Row 2 (y=16): ultrasonic level   mode
   oled.setCursor(0, 16);
-  float pres = sensors_pressureMPa();
-  char pbuf[11];
-  dtostrf(pres, 4, 2, pbuf);
-  oled.printf("%sMPa", pbuf);
+  oled.printf("US:%3u%%", sensors_ultrasonicLevelPct());
   // Mode at right
   const char* mn = modeName(settings().mode);
   char mn4[5]; strncpy(mn4, mn, 4); mn4[4] = 0;

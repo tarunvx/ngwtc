@@ -16,3 +16,6 @@ build/
 Thumbs.db
 
 .github/
+
+SECRETS.h
+*/SECRETS.h

@@ -17,8 +17,8 @@ bool     sensors_fbOff();
 int16_t  sensors_tempCx10();
 uint16_t sensors_rhX10();
 bool     sensors_levelPlausible();
-float    sensors_pressureMPa();
-uint8_t  sensors_pressurePct();  // pressure mapped to 0-100% tank level
+uint16_t sensors_distanceMm();          // ultrasonic air gap in mm (0 = no echo)
+uint8_t  sensors_ultrasonicLevelPct();  // ultrasonic level 0-100% (mapped on tank node)
 
 // Run one tick of sensor task (called from sensorTask).
 void sensors_tick();

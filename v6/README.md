@@ -117,33 +117,49 @@ by `LINK_NET_ID`, so there are no MAC addresses to hard-code.
 | Pressure out   | A0          | ADC  | analog            | **needs divider — see below**   |
 | Heartbeat LED  | D4          | 2    | onboard           | blinks on each transmit         |
 
-**Avoided on purpose:** `D0/GPIO16` (no pull-up, no interrupt — unusable for
-flow), and the strapping pins `D3/GPIO0`, `D4/GPIO2`, `D8/GPIO15`.
+**Avoided on purpose:** the strapping pins `D3/GPIO0` and `D4/GPIO2`.
+`D8/GPIO15` is safe as the ultrasonic **TRIG** (it idles LOW, which is exactly
+what the strap requires) and `D0/GPIO16` is safe as **ECHO** (no strapping role;
+`pulseIn` polls, so its lack of interrupt support doesn't matter).
 
-### Pressure divider (important)
+### Ultrasonic level sensor (important)
 
-The industrial transducer outputs **0.5 V (0 MPa) … 4.5 V (1 MPa)**. NodeMCU's
-`A0` board pin only tolerates **0–3.3 V**, so add an external divider:
+A **JSN-SR04T** replaces the old pressure transducer. It is mounted on **top** of
+the tank pointing down, so the measured distance is the **air gap** above the
+water:
 
 ```
-   SENSOR_OUT ──[ R_top 10k ]──┬── A0
-                               │
-                             [ R_bot 20k ]
-                               │
-                              GND
-
-   ratio = R_bot / (R_top + R_bot) = 20 / 30 = 0.667
-   4.5 V × 0.667 ≈ 3.0 V  ✓ (safe, with headroom)
+   small distance  =  FULL tank
+   large distance  =  EMPTY tank
 ```
 
-The node converts the divided reading back to the sensor's **native millivolts
-(500–4500)** and sends that. The **local node applies the identical v5 MPa
-formula**, so all pressure calibration stays in one place (the local node's
-`pressureEmptyMPa1000` / `pressureFullMPa1000` settings — unchanged).
+Two constants in `tank-node.ino` map that gap onto **0–100 %**:
 
-**Calibrate the divider:** measure the actual voltage at `A0` with a meter and
-adjust `PRESS_DIVIDER_RATIO` / `PRESS_BOARD_VREF` in `tank-node.ino` until the
-reported `pMv` matches the transducer's true output.
+| Constant | Default | Meaning |
+|---|---|---|
+| `US_DIST_FULL_CM` | `20` | air gap at **100 %** (water near the sensor) |
+| `US_DIST_LOW_CM`  | `100` | air gap at **0 %** (water far away) |
+
+Measure both on the real tank and set them. Keep `US_DIST_FULL_CM` at or above
+the sensor's **~20–25 cm dead zone** or the "full" end reads unreliably.
+
+**ECHO is a 5 V output** — it must be divided down before `GPIO16`:
+
+```
+   ECHO ──[ R1 1k ]──┬── D0 / GPIO16
+                     │
+                 [ R2 2k ]
+                     │
+                    GND        5 V × 2/3 = 3.33 V  ✓
+```
+
+Also fit a **100 µF capacitor across the sensor's VCC/GND** — its ping current
+spikes otherwise brown out the transducer and produce garbage readings. One ping
+is taken per telemetry frame and passed through a **rolling median**
+(`US_SAMPLES`) to reject the module's occasional wild outliers. The node ships
+both the raw distance (mm) and the mapped percent.
+
+> `A0` is now **unused** and free for future expansion.
 
 ### Float wiring
 
@@ -221,8 +237,9 @@ A single 26-byte packed frame, broadcast ~every 250 ms:
 | `floatBits`    | u8         | `LINK_FLOAT_25/50/75/100` bitmap (active-LOW resolved)|
 | `seq`          | u16        | rolls over; local node counts gaps                    |
 | `uptimeMs`     | u32        | tank node millis() (diagnostics)                      |
-| `flags`        | u8         | `PRESS_OK / FLOW_OK / ACTIVE`                         |
-| `pressureMv`   | u16        | sensor's **native** mV (500–4500)                     |
+| `flags`        | u8         | `DIST_OK / FLOW_OK / ACTIVE`                          |
+| `usLevelPct`   | u8         | ultrasonic level **0–100 %** (mapped on tank node)    |
+| `distanceMm`   | u16        | ultrasonic **air gap** in mm (0 = no echo)            |
 | `flowPulses`   | u16        | pulses this window (diagnostics)                      |
 | `flowWindowMs` | u16        | window length (diagnostics)                           |
 | `flowTotal`    | u32        | **cumulative** pulses since boot (local node diffs)   |
@@ -242,14 +259,15 @@ means a dropped frame never loses pulses.
 1. Set `ROUTER_SSID` in `tank-node.ino` to your 2.4 GHz network name (channel
    is auto-discovered; `WIFI_CHANNEL` is only the fallback).
 2. Flash the tank node. Open Serial @ 115200 — you should see periodic
-   `[TANK] seq=… floats=0x… pMv=… pulses=…` lines.
+   `[TANK] seq=… floats=0x… dist=…mm lvl=…% pulses=…` lines.
 3. Flash the local node. Open Serial @ 115200 — watch for
    `[LINK] ESP-NOW ready`, then `[LINK] UP (seq=…)` once it hears the tank node.
 4. Verify on the OLED: the **antenna icon** (top-right, left of WiFi) is solid.
    Pull power on the tank node → within 1 s it becomes a **blinking X**, a
    "TANK LINK LOST" popup appears, and any running pump stops.
 5. Confirm floats: lift each float and watch `level` change on the OLED / MQTT.
-6. Calibrate pressure divider (section 2) and verify `pressure_mpa` in MQTT.
+6. Calibrate the ultrasonic level: measure the air gap at full and empty, then
+   set `US_DIST_FULL_CM` / `US_DIST_LOW_CM` and verify `us_level` in MQTT.
 7. Calibrate flow with `flowKppl` (same v5 setting) against a known volume.
 
 ---
@@ -260,7 +278,7 @@ means a dropped frame never loses pulses.
 |--------------------------------------|-------------------------------------------------------------------|
 | Local node never sees `[LINK] UP`    | `ROUTER_SSID` typo/blank (tank fell back to `WIFI_CHANNEL`); compare the two nodes' printed `ch=` |
 | Link flaps up/down                   | Router changed channel at runtime (set `CHANNEL_RESCAN_MS`); weak antenna; >15 ft with obstacles  |
-| Pressure reads wrong                 | Divider ratio off — measure A0, tune `PRESS_DIVIDER_RATIO`/`VREF`  |
+| Ultrasonic reads 0 / jumps around    | Missing 1k/2k ECHO divider or 100 µF cap; target closer than the ~20 cm dead zone |
 | Level stuck / implausible warnings   | Float wiring not active-LOW to GND; check pull-ups                 |
 | Flow always 0                        | Flow on a non-interrupt pin; confirm D7/GPIO13; check `flowKppl`   |
 | `version mismatch` (frames ignored)  | The three `link_proto.h` copies differ — re-sync them             |

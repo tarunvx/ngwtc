@@ -4,7 +4,7 @@
   ============================================================
 
    Role: a "dumb", always-powered sensor relay mounted AT THE TANK.
-   It reads the level floats, pressure sensor and flow meter locally
+   It reads the level floats, ultrasonic water level and flow meter locally
    (short wires = no CAT6 analog noise) and broadcasts the readings to
    the LOCAL NODE (ESP32 brain) over ESP-NOW ~4 times per second.
 
@@ -28,34 +28,47 @@
      Float 75%   -> D5 / GPIO14   INPUT_PULLUP, active-LOW
      Float 100%  -> D6 / GPIO12   INPUT_PULLUP, active-LOW
      Flow (YF-S201) -> D7 / GPIO13  INPUT_PULLUP, FALLING-edge ISR
-     Pressure    -> A0            via external 10k/20k divider (see below)
+     Ultrasonic TRIG -> D8 / GPIO15   output (idle LOW = satisfies the strap)
+     Ultrasonic ECHO -> D0 / GPIO16   input, via 1k/2k divider (5V -> 3.3V)
      Onboard LED -> GPIO2 (D4)    TX heartbeat (active-LOW)
 
-   Avoided on purpose: D3/GPIO0, D4/GPIO2, D8/GPIO15 (boot strapping),
-   and D0/GPIO16 (no pull-up, no interrupt — unusable for flow).
+   Float/flow pins are UNCHANGED from the pressure-sensor build. The two
+   ultrasonic pins are the only ones added, and they were chosen so neither
+   breaks boot: GPIO15 must read LOW at boot and TRIG idles LOW; GPIO16 has
+   no strapping role and needs no interrupt (pulseIn polls). A0 is now free.
+
+   Avoided on purpose: D3/GPIO0, D4/GPIO2 (boot strapping).
 
    ----------------------------------------------------------------
-   PRESSURE SCALING  (IMPORTANT)
+   ULTRASONIC LEVEL  (JSN-SR04T)  — IMPORTANT
    ----------------------------------------------------------------
-   The industrial pressure transducer outputs 0.5 V (0 MPa) .. 4.5 V (1 MPa).
-   NodeMCU's A0 board pin tolerates only 0..3.3 V, so add an external divider
-   to bring 4.5 V down to ~3.0 V:
+   The transducer is mounted on TOP of the tank pointing down, so the
+   measured distance is the AIR GAP above the water:
 
-        SENSOR_OUT ──[ R_top 10k ]──┬── A0
-                                    │
-                                  [ R_bot 20k ]
-                                    │
-                                   GND
+       small distance = FULL tank        large distance = EMPTY tank
 
-     ratio = R_bot / (R_top + R_bot) = 20 / 30 = 0.667
+   Two constants map that gap onto 0..100%:
 
-   The node converts raw counts back into the sensor's NATIVE millivolts
-   (500..4500) and ships that. The LOCAL NODE then applies the *identical*
-   v5 formula  mpa = (mv/1000 - 0.5) * 0.25 , so calibration stays in one place.
+       US_DIST_FULL_CM (default  20 cm) -> 100%   (water near the sensor)
+       US_DIST_LOW_CM  (default 100 cm) ->   0%   (water far away)
 
-   Tune PRESS_DIVIDER_RATIO / PRESS_BOARD_VREF below to match your board
-   revision (some ESP-12 boards read slightly off; measure 3.30 V on A0 and
-   adjust PRESS_BOARD_VREF until reported mV matches a meter).
+   Measure both on the real tank and set them below. US_DIST_FULL_CM must
+   stay at/above the sensor's ~20-25 cm dead zone or the full reading is
+   unreliable. The node ships BOTH the raw distance (mm) and the mapped
+   percent, so the local node can display either without re-calibrating.
+
+   ECHO is a 5 V output — it MUST go through a divider before GPIO16:
+
+        ECHO ---[ R1 1k ]---+--- D0 / GPIO16
+                            |
+                        [ R2 2k ]
+                            |
+                           GND          V = 5 * 2/3 = 3.33 V
+
+   Also fit a 100 uF capacitor across the sensor's VCC/GND — its ping
+   current spikes otherwise brown out the transducer and wreck readings.
+   One ping is taken per telemetry frame and fed through a rolling median
+   (US_SAMPLES) to reject the module's occasional wild outliers.
 
    ----------------------------------------------------------------
    ESP-NOW CHANNEL — AUTO-DISCOVERY (Option B)
@@ -96,10 +109,14 @@
 #define TELEMETRY_PERIOD_MS 250     // ~4 Hz telemetry
 #define NOFLOW_PPS_FLOOR    1       // pulses/sec below this => not "active"
 
-// Pressure divider / ADC calibration (see header notes above)
-#define PRESS_DIVIDER_RATIO 0.667f  // R_bot/(R_top+R_bot); 10k/20k OR 15k/30k both ≈0.667 (bench-validated)
-#define PRESS_BOARD_VREF    3.3f    // full-scale volts at the A0 board pin
-#define PRESS_ADC_MAX       1023.0f // ESP8266 ADC is 10-bit
+// Ultrasonic level mapping — sensor on top, so distance shrinks as it fills.
+#define US_DIST_FULL_CM     20      // air gap at 100% full (>= sensor dead zone)
+#define US_DIST_LOW_CM     100      // air gap at 0% (empty)
+#define US_MIN_VALID_CM     20      // JSN-SR04T dead zone — reject nearer echoes
+#define US_MAX_VALID_CM    600      // sensor max range
+#define US_ECHO_TIMEOUT_US  25000UL // pulseIn timeout (~4.3 m round trip)
+#define US_SAMPLES          5       // rolling median window (ODD)
+#define US_TEMP_C           25.0f   // ambient temp for speed-of-sound accuracy
 
 // ---- Pin map -----------------------------------------------
 #define PIN_FLOAT_25   5    // D1
@@ -107,7 +124,8 @@
 #define PIN_FLOAT_75   14   // D5
 #define PIN_FLOAT_100  12   // D6
 #define PIN_FLOW       13   // D7
-// A0 is the analog pin (no macro needed)
+#define PIN_US_TRIG    15   // D8 — idle LOW, which is what the boot strap needs
+#define PIN_US_ECHO    16   // D0 — via 1k/2k divider; pulseIn polls, no IRQ
 
 // Broadcast to everyone on-channel; the local node filters by LINK_NET_ID.
 static uint8_t s_broadcast[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
@@ -128,6 +146,12 @@ static uint32_t s_lastWindowMs = 0;
 static bool     s_lastSendOk = false;
 static uint8_t  s_channel = WIFI_CHANNEL;   // resolved ESP-NOW channel (updated by discovery)
 static uint32_t s_lastScanMs = 0;
+
+// Ultrasonic rolling-median state
+static uint16_t s_usBuf[US_SAMPLES] = {0};
+static uint8_t  s_usFill = 0;
+static uint8_t  s_usIdx  = 0;
+static uint16_t s_usDistMm = 0;   // last good median distance (0 = never read)
 
 // Scan for ROUTER_SSID and return the 2.4 GHz channel it's on, or 0 if the
 // SSID is blank / not found. Passive scan — no password required. Blocks
@@ -162,15 +186,53 @@ static uint8_t readFloatBits() {
   return bits;
 }
 
-// Convert raw A0 counts -> native sensor millivolts (500..4500 typical).
-static uint16_t readPressureMv() {
-  int raw = analogRead(A0);                       // 0..1023
-  float boardV  = (raw / PRESS_ADC_MAX) * PRESS_BOARD_VREF;
-  float sensorV = boardV / PRESS_DIVIDER_RATIO;   // undo external divider
-  float mv = sensorV * 1000.0f;
-  if (mv < 0)     mv = 0;
-  if (mv > 6000)  mv = 6000;                       // clamp to sane ceiling
-  return (uint16_t)(mv + 0.5f);
+// One ultrasonic ping -> distance in mm, or 0 if no/implausible echo.
+static uint16_t usPingMm() {
+  digitalWrite(PIN_US_TRIG, LOW);
+  delayMicroseconds(3);
+  digitalWrite(PIN_US_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PIN_US_TRIG, LOW);
+
+  unsigned long dur = pulseIn(PIN_US_ECHO, HIGH, US_ECHO_TIMEOUT_US);
+  if (dur == 0) return 0;
+
+  // Speed of sound c = 331.4 + 0.606*T [m/s] -> mm/us is c/1000; halve for round trip.
+  float mm = dur * ((331.4f + 0.606f * US_TEMP_C) / 1000.0f) / 2.0f;
+  if (mm < US_MIN_VALID_CM * 10.0f) return 0;
+  if (mm > US_MAX_VALID_CM * 10.0f) return 0;
+  return (uint16_t)(mm + 0.5f);
+}
+
+// Rolling median of the last US_SAMPLES good pings — the JSN-SR04T throws
+// occasional wild outliers that an average would smear into the reading.
+static void usUpdate() {
+  uint16_t mm = usPingMm();
+  if (mm == 0) return;                 // miss: keep the last good median
+
+  s_usBuf[s_usIdx] = mm;
+  s_usIdx = (uint8_t)((s_usIdx + 1) % US_SAMPLES);
+  if (s_usFill < US_SAMPLES) s_usFill++;
+
+  uint16_t tmp[US_SAMPLES];
+  memcpy(tmp, s_usBuf, s_usFill * sizeof(uint16_t));
+  for (uint8_t i = 1; i < s_usFill; i++) {      // insertion sort
+    uint16_t key = tmp[i];
+    int8_t j = (int8_t)(i - 1);
+    while (j >= 0 && tmp[j] > key) { tmp[j + 1] = tmp[j]; j--; }
+    tmp[j + 1] = key;
+  }
+  s_usDistMm = tmp[s_usFill / 2];
+}
+
+// Map the air gap onto 0..100%: near sensor = full, far = empty.
+static uint8_t usLevelPct(uint16_t distMm) {
+  if (distMm == 0) return 0;
+  const uint16_t fullMm = (uint16_t)(US_DIST_FULL_CM * 10);
+  const uint16_t lowMm  = (uint16_t)(US_DIST_LOW_CM  * 10);
+  if (distMm <= fullMm) return 100;
+  if (distMm >= lowMm)  return 0;
+  return (uint8_t)(((uint32_t)(lowMm - distMm) * 100UL) / (uint32_t)(lowMm - fullMm));
 }
 
 static void onSent(uint8_t* /*mac*/, uint8_t status) {
@@ -193,6 +255,11 @@ void setup() {
   // (bench-validated: the internal pull-up alone is too weak for clean edges).
   pinMode(PIN_FLOW,      INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_FLOW), flowIsr, FALLING);
+
+  // ECHO arrives through a 1k/2k divider; TRIG idles LOW so GPIO15 boots clean.
+  pinMode(PIN_US_TRIG, OUTPUT);
+  digitalWrite(PIN_US_TRIG, LOW);
+  pinMode(PIN_US_ECHO, INPUT);
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH); // off (active-LOW)
@@ -265,6 +332,8 @@ void loop() {
   // the local node owns the LPM math + smoothing identical to v5).
   uint32_t pps = (windowMs > 0) ? (pulses * 1000UL / windowMs) : 0;
 
+  usUpdate();   // one ping per frame, folded into the rolling median
+
   LinkTelemetry t;
   t.netId        = LINK_NET_ID;
   t.version      = LINK_PROTO_VERSION;
@@ -272,10 +341,11 @@ void loop() {
   t.floatBits    = readFloatBits();
   t.seq          = s_seq++;
   t.uptimeMs     = now;
-  t.flags        = LINK_FLAG_PRESS_OK | LINK_FLAG_FLOW_OK;
+  t.flags        = LINK_FLAG_FLOW_OK;
+  if (s_usDistMm > 0)          t.flags |= LINK_FLAG_DIST_OK;
   if (pps >= NOFLOW_PPS_FLOOR) t.flags |= LINK_FLAG_ACTIVE;
-  t._pad         = 0;
-  t.pressureMv   = readPressureMv();
+  t.usLevelPct   = usLevelPct(s_usDistMm);
+  t.distanceMm   = s_usDistMm;
   t.flowPulses   = (uint16_t)(pulses > 0xFFFF ? 0xFFFF : pulses);
   t.flowWindowMs = (uint16_t)(windowMs > 0xFFFF ? 0xFFFF : windowMs);
   t.flowTotal    = total;
@@ -293,8 +363,8 @@ void loop() {
   static uint8_t dbg = 0;
   if (++dbg >= 8) {
     dbg = 0;
-    Serial.printf("[TANK] ch=%u seq=%u floats=0x%02X pMv=%u pulses=%lu total=%lu win=%lums send=%s\n",
-      s_channel, (unsigned)t.seq, t.floatBits, t.pressureMv,
+    Serial.printf("[TANK] ch=%u seq=%u floats=0x%02X dist=%umm lvl=%u%% pulses=%lu total=%lu win=%lums send=%s\n",
+      s_channel, (unsigned)t.seq, t.floatBits, t.distanceMm, t.usLevelPct,
       (unsigned long)pulses, (unsigned long)total, (unsigned long)windowMs,
       s_lastSendOk ? "ok" : "?");
   }

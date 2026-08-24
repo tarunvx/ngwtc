@@ -21,7 +21,8 @@ static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // Shared snapshot (written in callback, read in accessors) — guarded by s_mux.
 static volatile uint8_t  s_floatBits   = 0;
-static volatile uint16_t s_pressureMv  = 0;
+static volatile uint16_t s_distanceMm  = 0;
+static volatile uint8_t  s_usLevelPct  = 0;
 static volatile uint32_t s_flowTotal   = 0;
 static volatile uint16_t s_seq         = 0;
 static volatile uint8_t  s_flags       = 0;
@@ -62,7 +63,8 @@ static void onRecv(const uint8_t* /*mac*/, const uint8_t* data, int len) {
   s_havePrevSeq = true;
 
   s_floatBits   = t.floatBits;
-  s_pressureMv  = t.pressureMv;
+  s_distanceMm  = t.distanceMm;
+  s_usLevelPct  = t.usLevelPct;
   s_flowTotal   = t.flowTotal;
   s_seq         = t.seq;
   s_flags       = t.flags;
@@ -154,9 +156,16 @@ uint8_t link_levelPct() {
   return 0;
 }
 
-uint16_t link_pressureMv() {
+uint16_t link_distanceMm() {
   portENTER_CRITICAL(&s_mux);
-  uint16_t v = s_pressureMv;
+  uint16_t v = s_distanceMm;
+  portEXIT_CRITICAL(&s_mux);
+  return v;
+}
+
+uint8_t link_usLevelPct() {
+  portENTER_CRITICAL(&s_mux);
+  uint8_t v = s_usLevelPct;
   portEXIT_CRITICAL(&s_mux);
   return v;
 }

@@ -27,8 +27,6 @@ enum MenuItem : uint8_t {
   MI_BYPASS_FEEDBACK,
   MI_SET_CUTOFF_MIN,
   MI_SET_CUTOFF_MAX,
-  MI_SET_PRESSURE_MIN,
-  MI_SET_PRESSURE_MAX,
   MI_SET_FLOW_THRESH,
   MI_SET_PULSE_ON,
   MI_SET_PULSE_OFF,
@@ -58,8 +56,6 @@ static const char* kLabels[MI_COUNT] = {
   "Bypass Feedback",
   "MIN Water Level",
   "MAX Water Level",
-  "Pressure 0%",
-  "Pressure 100%",
   "Flow Threshold",
   "Pulse ON (ms)",
   "Pulse OFF (ms)",
@@ -127,8 +123,6 @@ static void startEdit(const char* title, const char* unit,
 
 static void commitCutoffMin(int32_t v) { settings_setU8("cutoffMinPct", (uint8_t)v); }
 static void commitCutoffMax(int32_t v) { settings_setU8("cutoffMaxPct", (uint8_t)v); }
-static void commitPressMin(int32_t v)  { settings_setU16("pressureEmptyMPa1000", (uint16_t)v); }
-static void commitPressMax(int32_t v)  { settings_setU16("pressureFullMPa1000", (uint16_t)v); }
 static void commitFlowThresh(int32_t v){ settings_setU16("flowNoFlowThresh", (uint16_t)v); }
 static void commitPulseOn(int32_t v)   { settings_setU32("pulseOnMs", (uint32_t)v); }
 static void commitPulseOff(int32_t v)  { settings_setU32("pulseOffMs", (uint32_t)v); }
@@ -205,12 +199,6 @@ static void activate() {
       return;
     case MI_SET_CUTOFF_MAX:
       startEdit("MAX Water Level", "%", settings().cutoffMaxPct, 50, 100, 5, commitCutoffMax);
-      return;
-    case MI_SET_PRESSURE_MIN:
-      startEdit("Pressure 0%", "mMPa", settings().pressureEmptyMPa1000, 0, 500, 10, commitPressMin);
-      return;
-    case MI_SET_PRESSURE_MAX:
-      startEdit("Pressure 100%", "mMPa", settings().pressureFullMPa1000, 10, 1000, 10, commitPressMax);
       return;
     case MI_SET_FLOW_THRESH:
       startEdit("No-Flow Thr", "x10Lpm", settings().flowNoFlowThresh, 0, 100, 5, commitFlowThresh);

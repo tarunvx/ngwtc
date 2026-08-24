@@ -6,7 +6,7 @@
 //   ┌────────────────────┐         ESP-NOW broadcast        ┌────────────────────┐
 //   │   TANK NODE        │   ───────────────────────────►   │   LOCAL NODE       │
 //   │   (ESP8266 ESP-12) │     LinkTelemetry @ ~4 Hz        │   (ESP32 brain)    │
-//   │  floats/press/flow │                                  │  relays/CT/UI/MQTT │
+//   │  floats/dist/flow  │                                  │  relays/CT/UI/MQTT │
 //   └────────────────────┘                                  └────────────────────┘
 //
 //  This header is the SINGLE SOURCE OF TRUTH for the on-air packet layout.
@@ -34,7 +34,7 @@
 #include <stddef.h>
 
 // ---- Protocol identity ------------------------------------
-#define LINK_PROTO_VERSION  1      // bump on any struct layout change
+#define LINK_PROTO_VERSION  2      // bump on any struct layout change
 #define LINK_NET_ID         0x57   // 'W' — private network tag, filters foreign packets
 #define LINK_MSG_TELEMETRY  1      // msgType: tank → local sensor frame
 
@@ -48,7 +48,7 @@
 #define LINK_FLOAT_100  0x08
 
 // ---- Status flags -----------------------------------------
-#define LINK_FLAG_PRESS_OK  0x01   // pressure ADC read looks valid
+#define LINK_FLAG_DIST_OK   0x01   // ultrasonic distance read looks valid
 #define LINK_FLAG_FLOW_OK   0x02   // flow input wired / counting
 #define LINK_FLAG_LOW_BATT  0x04   // reserved (tank node is mains powered)
 #define LINK_FLAG_ACTIVE    0x08   // tank node sees flow above no-flow floor
@@ -64,10 +64,10 @@ typedef struct __attribute__((packed)) {
   uint16_t seq;          // rolls over; lets local node spot drops
   uint32_t uptimeMs;     // tank node millis() — diagnostics only
   uint8_t  flags;        // LINK_FLAG_* bitmap
-  uint8_t  _pad;         // keep 16-bit fields aligned + reserved
-  uint16_t pressureMv;   // pressure sensor output, scaled to its native mV
-                         //   (0.5V..4.5V sensor => 500..4500). Local node
-                         //   applies the SAME MPa formula as v5.
+  uint8_t  usLevelPct;   // ultrasonic tank level, 0..100% (mapped on tank node)
+  uint16_t distanceMm;   // ultrasonic air-gap to the water surface, in mm.
+                         //   Sensor sits on top: SMALL distance = FULL tank.
+                         //   0 = no valid echo yet.
   uint16_t flowPulses;   // pulses counted in THIS telemetry window (diag)
   uint16_t flowWindowMs; // length of this window in ms (diag)
   uint32_t flowTotal;    // cumulative pulses since tank-node boot.

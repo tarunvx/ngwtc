@@ -181,7 +181,7 @@ void mqtt_publishStatus() {
   snprintf(json, sizeof(json),
     "{\"online\":true,\"mode\":\"%s\",\"state\":\"%s\",\"sleep\":%s,"
     "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"faults\":%u,"
-    "\"temp_cx10\":%d,\"rh_x10\":%u,\"pressure_mpa\":%d,"
+    "\"temp_cx10\":%d,\"rh_x10\":%u,\"dist_mm\":%u,\"us_level\":%u,"
     "\"bypass_i\":%s,\"bypass_f\":%s,\"overflow\":%s,"
     "\"link\":%s,\"link_age_ms\":%lu,\"link_seq\":%u,\"link_drops\":%lu}",
     modeName(settings().mode), sm_stateName(sm_state()),
@@ -189,7 +189,7 @@ void mqtt_publishStatus() {
     sensors_levelPct(), sensors_flowLpmX10(),
     sensors_currentMv(), (unsigned)faultlog_count(),
     (int)sensors_tempCx10(), (unsigned)sensors_rhX10(),
-    (int)(sensors_pressureMPa() * 1000),  // mPa integer for JSON simplicity
+    (unsigned)sensors_distanceMm(), (unsigned)sensors_ultrasonicLevelPct(),
     settings().bypassCurrentSense ? "true" : "false",
     settings().bypassFlowSense ? "true" : "false",
     sm_overflowIgnore() ? "true" : "false",
