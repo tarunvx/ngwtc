@@ -4,12 +4,17 @@
 #include <Arduino.h>
 
 // ============================================================
-//  link.h — v6 ESP-NOW receive layer (LOCAL NODE / ESP32)
+//  link.h — v6 wired tank link, receive side (LOCAL NODE / ESP32)
 //
-//  Receives LinkTelemetry frames broadcast by the tank node, validates
-//  them (LINK_NET_ID + version + CRC16), and exposes the latest sensor
-//  snapshot to the rest of the firmware. The sensors module sources
-//  floats/level/flow from here instead of local GPIO.
+//  Receives LinkTelemetry frames sent by the tank node over a one-way
+//  3.3 V UART (tank TX -> PIN_LINK_RX, common ground), validates them
+//  (LINK_NET_ID + version + CRC16), and exposes the latest sensor snapshot
+//  to the rest of the firmware. The sensors module sources floats/level/flow
+//  from here instead of local GPIO.
+//
+//  Replaced ESP-NOW in v6.1: the radio link measured -93 dBm with ~66%
+//  packet loss at the installed positions, and its attenuation varied with
+//  tank level. The wire is deterministic and reuses the existing cable.
 //
 //  Liveness: if no valid frame arrives within LINK_TIMEOUT_MS, the link
 //  is considered DOWN and link_tick() emits EV_LINK_DOWN (and EV_LINK_UP
@@ -18,8 +23,8 @@
 
 #define LINK_TIMEOUT_MS  1000   // no valid frame for 1s => link down (4 frames)
 
-void     link_init();           // call AFTER WiFi is in STA mode (post mqtt_init)
-void     link_tick();           // periodic: liveness edge detection + events
+void     link_init();           // opens the UART; no WiFi dependency
+void     link_tick();           // periodic: drain UART, parse, liveness events
 
 // ---- Liveness ----------------------------------------------
 bool     link_alive();          // true if a valid frame arrived within timeout

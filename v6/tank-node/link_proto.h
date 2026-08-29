@@ -3,7 +3,7 @@
 //
 //  Smart Water Tank Controller, two-node ESP-NOW design.
 //
-//   ┌────────────────────┐         ESP-NOW broadcast        ┌────────────────────┐
+//   ┌──────────────────┐        wired UART link          ┌──────────────────┐
 //   │   TANK NODE        │   ───────────────────────────►   │   LOCAL NODE       │
 //   │   (ESP8266 ESP-12) │     LinkTelemetry @ ~4 Hz        │   (ESP32 brain)    │
 //   │  floats/dist/flow  │                                  │  relays/CT/UI/MQTT │
@@ -23,9 +23,11 @@
 //  serializes identically on the wire. Do NOT reorder or resize fields without
 //  bumping LINK_PROTO_VERSION (the receiver rejects mismatched versions).
 //
-//  Integrity: ESP-NOW encryption is NOT cross-compatible between ESP8266 and
-//  ESP32, so the link runs UNENCRYPTED and we protect payloads with a CRC16.
-//  Spoofing is mitigated by LINK_NET_ID + version + msgType filtering.
+//  Integrity: the wire is a raw byte stream with no packet boundaries, so the
+//  three constant leading fields (netId, version, msgType) double as the frame
+//  PREAMBLE — the receiver hunts for that 3-byte signature, collects
+//  sizeof(LinkTelemetry) bytes, then validates the CRC16. A false preamble
+//  match inside payload data simply fails CRC and the parser resynchronises.
 // ============================================================
 #ifndef LINK_PROTO_H
 #define LINK_PROTO_H
@@ -37,6 +39,10 @@
 #define LINK_PROTO_VERSION  2      // bump on any struct layout change
 #define LINK_NET_ID         0x57   // 'W' — private network tag, filters foreign packets
 #define LINK_MSG_TELEMETRY  1      // msgType: tank → local sensor frame
+
+// Wire speed — both nodes must agree. 9600 carries the ~26 B @ 4 Hz telemetry
+// with ~10x headroom and was bench-proven error-free over the installed run.
+#define LINK_SERIAL_BAUD    9600
 
 // ---- Float bit map (bit set = float submerged / contact CLOSED) ----
 //  Mirrors v5 active-LOW float wiring: water grounds the input.
@@ -54,7 +60,7 @@
 #define LINK_FLAG_ACTIVE    0x08   // tank node sees flow above no-flow floor
 
 // ============================================================
-//  On-air telemetry frame (26 bytes). Sent ~every 250 ms.
+//  Telemetry frame (26 bytes). Sent ~every 250 ms.
 // ============================================================
 typedef struct __attribute__((packed)) {
   uint8_t  netId;        // == LINK_NET_ID

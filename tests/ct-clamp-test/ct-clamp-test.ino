@@ -139,3 +139,23 @@ void loop() {
                 "samples=%lu (%.0f sps)\n",
                 amps, rmsMv, offsetMv, (unsigned long)n, sps);
 }
+
+
+
+
+/**
+ *  Test Values for the CT clamp readings.
+ * 
+
+22:16:44.080 -> Current:   0.14 A  | Vrms=   4.57 mV  offset=1390 mV  samples=4637 (23185 sps)
+22:16:44.574 -> Current:   0.09 A  | Vrms=   3.16 mV  offset=1412 mV  samples=4637 (23185 sps)
+22:16:45.102 -> Current:   0.12 A  | Vrms=   4.10 mV  offset=1412 mV  samples=4637 (23185 sps)
+22:16:45.598 -> Current:  23.07 A  | Vrms= 768.91 mV  offset=1409 mV  samples=4635 (23175 sps)
+22:16:46.093 -> Current:  21.53 A  | Vrms= 717.76 mV  offset=1412 mV  samples=4637 (23185 sps)
+22:16:46.587 -> Current:  17.67 A  | Vrms= 588.85 mV  offset=1414 mV  samples=4637 (23185 sps)
+22:16:47.078 -> Current:   8.31 A  | Vrms= 276.89 mV  offset=1412 mV  samples=4637 (23185 sps)
+22:16:47.571 -> Current:   8.17 A  | Vrms= 272.32 mV  offset=1412 mV  samples=4637 (23185 sps)
+22:16:48.100 -> Current:   8.17 A  | Vrms= 272.26 mV  offset=1411 mV  samples=4638 (23190 sps)
+
+ * 
+ */

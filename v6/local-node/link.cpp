@@ -1,25 +1,24 @@
 #include "link.h"
 #include "link_proto.h"
 #include "config.h"
+#include "pins.h"
 #include "events.h"
 #include "event_queue.h"
 
-#include <WiFi.h>
-#include <esp_now.h>
-#include <esp_wifi.h>
-
 // ============================================================
-//  ESP-NOW receive layer for the LOCAL NODE (ESP32).
+//  Wired UART receive layer for the LOCAL NODE (ESP32).
 //
-//  The receive callback runs in the WiFi task context. We copy validated
-//  frames into a snapshot guarded by a portMUX spinlock; all liveness
-//  edge-detection and event emission happens in link_tick() (Control task)
-//  to keep the callback short and non-blocking.
+//  Bytes are drained and parsed in link_tick() (Control task) rather than an
+//  ISR, so no work happens in interrupt context. The snapshot is still
+//  portMUX-guarded because the accessors are called from other tasks (UI,
+//  MQTT) pinned to the other core.
 // ============================================================
+
+#define LINK_SERIAL  Serial1
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 
-// Shared snapshot (written in callback, read in accessors) — guarded by s_mux.
+// Shared snapshot (written by the parser, read by accessors) — guarded by s_mux.
 static volatile uint8_t  s_floatBits   = 0;
 static volatile uint16_t s_distanceMm  = 0;
 static volatile uint8_t  s_usLevelPct  = 0;
@@ -36,59 +35,80 @@ static volatile bool     s_havePrevSeq = false;
 static bool     s_alivePrev = false;
 static bool     s_linkInit  = false;
 
-// ---- ESP-NOW receive callback ------------------------------
-// Arduino-ESP32 core 3.x changed the callback signature to take an
-// esp_now_recv_info_t*; core 2.x passes the raw MAC. Support both.
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-static void onRecv(const esp_now_recv_info_t* /*info*/, const uint8_t* data, int len) {
-#else
-static void onRecv(const uint8_t* /*mac*/, const uint8_t* data, int len) {
-#endif
-  if (len != (int)sizeof(LinkTelemetry)) return;
+// Frame parser state
+static uint8_t  s_buf[sizeof(LinkTelemetry)];
+static uint8_t  s_idx  = 0;
+static uint8_t  s_sync = 0;   // 0=want netId, 1=want version, 2=want msgType, 3=body
 
-  LinkTelemetry t;
-  memcpy(&t, data, sizeof(t));
-  if (!link_checkFrame(&t, (size_t)len)) return;   // bad netId/version/CRC
-
-  portENTER_CRITICAL_ISR(&s_mux);
+static void acceptFrame(const LinkTelemetry* t) {
+  portENTER_CRITICAL(&s_mux);
   // Sequence-gap accounting (diagnostics only).
   if (s_havePrevSeq) {
     uint16_t expected = (uint16_t)(s_prevSeq + 1);
-    if (t.seq != expected) {
-      uint16_t gap = (uint16_t)(t.seq - expected);
+    if (t->seq != expected) {
+      uint16_t gap = (uint16_t)(t->seq - expected);
       s_dropCount += gap;
     }
   }
-  s_prevSeq     = t.seq;
+  s_prevSeq     = t->seq;
   s_havePrevSeq = true;
 
-  s_floatBits   = t.floatBits;
-  s_distanceMm  = t.distanceMm;
-  s_usLevelPct  = t.usLevelPct;
-  s_flowTotal   = t.flowTotal;
-  s_seq         = t.seq;
-  s_flags       = t.flags;
+  s_floatBits   = t->floatBits;
+  s_distanceMm  = t->distanceMm;
+  s_usLevelPct  = t->usLevelPct;
+  s_flowTotal   = t->flowTotal;
+  s_seq         = t->seq;
+  s_flags       = t->flags;
   s_lastRxMs    = millis();
   s_everRx      = true;
-  portEXIT_CRITICAL_ISR(&s_mux);
+  portEXIT_CRITICAL(&s_mux);
+}
+
+// The three constant leading fields double as the frame preamble on a byte
+// stream; a false match inside payload data just fails CRC and resyncs.
+static void parseByte(uint8_t b) {
+  switch (s_sync) {
+    case 0:
+      if (b == LINK_NET_ID) { s_buf[0] = b; s_sync = 1; }
+      break;
+    case 1:
+      if      (b == LINK_PROTO_VERSION) { s_buf[1] = b; s_sync = 2; }
+      else if (b == LINK_NET_ID)        { s_buf[0] = b; }
+      else                              { s_sync = 0; }
+      break;
+    case 2:
+      if      (b == LINK_MSG_TELEMETRY) { s_buf[2] = b; s_idx = 3; s_sync = 3; }
+      else if (b == LINK_NET_ID)        { s_buf[0] = b; s_sync = 1; }
+      else                              { s_sync = 0; }
+      break;
+    default:
+      s_buf[s_idx++] = b;
+      if (s_idx >= sizeof(LinkTelemetry)) {
+        LinkTelemetry t;
+        memcpy(&t, s_buf, sizeof(t));
+        if (link_checkFrame(&t, sizeof(t))) acceptFrame(&t);
+        s_sync = 0;
+      }
+      break;
+  }
 }
 
 void link_init() {
-  // WiFi must already be in STA mode (mqtt_init() does WiFi.mode(WIFI_STA)).
-  if (esp_now_init() != ESP_OK) {
-    Serial.println(F("[LINK] ESP-NOW init FAILED"));
-    return;
-  }
-  esp_now_register_recv_cb(onRecv);
+  LINK_SERIAL.setRxBufferSize(256);
+  LINK_SERIAL.begin(LINK_SERIAL_BAUD, SERIAL_8N1, PIN_LINK_RX, PIN_LINK_TX);
   s_linkInit  = true;
   s_alivePrev = false;
-  Serial.print(F("[LINK] ESP-NOW ready. Local MAC: "));
-  Serial.println(WiFi.macAddress());
+  s_sync = 0;
+  Serial.printf("[LINK] UART RX on GPIO%d @ %d baud\n",
+    PIN_LINK_RX, LINK_SERIAL_BAUD);
   Serial.println(F("[LINK] waiting for tank-node telemetry..."));
 }
 
 void link_tick() {
   if (!s_linkInit) return;
+
+  while (LINK_SERIAL.available()) parseByte((uint8_t)LINK_SERIAL.read());
+
   bool alive = link_alive();
   if (alive != s_alivePrev) {
     s_alivePrev = alive;

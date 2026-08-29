@@ -58,8 +58,8 @@ void setup() {
   buzzer_init();
   led_init();
   ui_init();
-  mqtt_init();            // also connects WiFi (STA mode, fixed router channel)
-  link_init();            // ESP-NOW receiver — must follow WiFi STA init
+  mqtt_init();            // also connects WiFi (STA mode)
+  link_init();            // wired tank link (UART); independent of WiFi
   initNTP();              // start NTP after WiFi
   sm_init();
   menu_init();

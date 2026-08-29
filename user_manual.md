@@ -174,7 +174,7 @@ The home screen shows five rows:
 |---|---|---|
 | 1 | **Level %** · current **state** · link & Wi-Fi icons | `75%  IDLE  📶` |
 | 2 | **Pressure** · **mode** | `0.42MPa  AUTO` |
-| 3 | **Flow** (litres/min) · **current** (volts) | `12.30L  1.20V` |
+| 3 | **Flow** (whole litres/min) · **current** (whole amps) | `FL:12  I:10` |
 | 4 | **Temperature** · **humidity** | `T:29.4C  RH:61%` |
 | 5 | **Day & time** (or uptime if clock not set) | `Mon 06:45 PM` |
 
@@ -185,7 +185,8 @@ The home screen shows five rows:
 
 Whenever the pump is active the screen **automatically switches** to a big,
 easy-to-read running view: the **state**, a **run timer (MM:SS)**, the **level**,
-and **flow / current**. Tap **B1** to flip back to the home screen while it runs.
+and **flow / current** (same `FL:XX  I:XX` columns as the home screen). Tap **B1**
+to flip back to the home screen while it runs.
 
 The bottom line of the running screen warns you if any sensor check has been
 switched off, or shows `** OVERFLOW RUN 1x **` during an overflow run.
@@ -204,12 +205,18 @@ shows the **water level**:
 
 | Level | Light bar |
 |---|---|
-| Empty (0%) | Top LEDs **blink red** |
+| Empty (0%) | Bottom LED **blinks red** |
 | Up to 25% | Top **red** |
 | Up to 50% | **Orange** |
 | Up to 75% | **Yellow** |
 | Up to 100% | **Blue** |
 | Full (100%) | **All green** |
+
+> **Two bar modes.** By default the bar follows the **float switches**, so it
+> moves in 25% steps. Switch the menu item **"LED: Flt/US"** to *Ultrasonic* and
+> it instead shows the **continuous** level from the ultrasonic sensor, filling
+> smoothly from 0–100%. This only changes the display — the pump's safety logic
+> always uses the floats.
 
 Some system states **override** the level display:
 
@@ -467,6 +474,8 @@ are **saved** and survive power cuts and updates. Highlights:
 - **Mode:** AUTO / MANUAL / TIMER, Sleep on/off.
 - **Smart-Sense:** auto-detect a pump someone started by hand and monitor it.
 - **Ignore Full 1x:** arm the overflow override (§10).
+- **LED: Flt/US:** whether the light bar shows the float steps or the continuous
+  ultrasonic level.
 - **Bypass checks:** temporarily switch off the current / flow / feedback checks
   during setup (use with care — the screen warns while bypassed).
 - **Water levels:** minimum (start) and maximum (stop) percentages.

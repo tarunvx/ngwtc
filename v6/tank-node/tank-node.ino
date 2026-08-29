@@ -71,41 +71,36 @@
    (US_SAMPLES) to reject the module's occasional wild outliers.
 
    ----------------------------------------------------------------
-   ESP-NOW CHANNEL — AUTO-DISCOVERY (Option B)
+   WIRED LINK (replaced ESP-NOW in v6.1)
    ----------------------------------------------------------------
-   ESP-NOW peers must share one WiFi channel. The ESP32 local node joins
-   your router (STA), so it automatically sits on the router's 2.4 GHz
-   channel. To match it WITHOUT you having to find/lock the router setting,
-   this tank node SCANS for your router's SSID on boot and locks ESP-NOW to
-   whatever channel that SSID is on.
+   Telemetry goes out of hardware UART0 as a one-way byte stream:
 
-   Set ROUTER_SSID below to your 2.4 GHz network name (the PASSWORD is NOT
-   needed — scanning is passive). If ROUTER_SSID is left blank or the SSID
-   isn't found, it falls back to the fixed WIFI_CHANNEL.
+     NodeMCU TX (D10 / GPIO1)  ------------->  ESP32 GPIO32
+     GND                       <----------->   GND  (already common via the
+                                                power pair in the same cable)
 
-   Note: ESP8266/ESP32 are 2.4 GHz only — a dual-band router is fine; the
-   MCUs simply never see the 5 GHz radio. If both bands share one SSID, the
-   scan still returns the 2.4 GHz channel (the only one these chips can see).
+   Both MCUs are 3.3 V logic, so this is a direct connection — no level
+   shifter. A solid common ground is essential; UART is single-ended and
+   has no voltage reference without it.
 
-   Optional: set CHANNEL_RESCAN_MS > 0 to periodically re-discover at runtime
-   (handles a router that changes channel while the tank node stays powered).
-   Default 0 = discover once at boot only (a re-scan briefly pauses telemetry,
-   which the local node would see as a ~1 s link blip — hence off by default).
+   Why not ESP-NOW: measured -93 dBm with ~66% packet loss at the installed
+   positions, and the attenuation varied with tank level (water absorbs
+   2.4 GHz), so the link degraded exactly when it mattered.
 
-   Board: "NodeMCU 1.0 (ESP-12E Module)"  |  Flash 4MB  |  115200 baud
+   Because UART0 carries the link, this node prints no debug text by default
+   and the onboard LED blinks once per frame instead. Set TANK_DEBUG 1 to get
+   text on UART1 (GPIO2/D4) via a USB-TTL adapter — that disables the LED.
+   Link health (seq, drops, age) is reported by the LOCAL node anyway.
+
+   Board: "NodeMCU 1.0 (ESP-12E Module)"  |  Flash 4MB
   ============================================================
 */
 
 #include <ESP8266WiFi.h>
-#include <espnow.h>
 #include "link_proto.h"
 
 // ---- USER CONFIG -------------------------------------------
-#define ROUTER_SSID         ""      // your 2.4 GHz network name (NO password needed).
-                                    // Blank => skip discovery, use WIFI_CHANNEL below.
-#define WIFI_CHANNEL        1       // fallback channel if ROUTER_SSID not found
-#define CHANNEL_RESCAN_MS   0       // >0 = periodically re-discover router channel
-                                    // (0 = boot-only; a re-scan pauses TX ~1s)
+#define TANK_DEBUG          0       // 1 = text debug on UART1 (GPIO2), disables LED
 #define TELEMETRY_PERIOD_MS 250     // ~4 Hz telemetry
 #define NOFLOW_PPS_FLOOR    1       // pulses/sec below this => not "active"
 
@@ -127,8 +122,11 @@
 #define PIN_US_TRIG    15   // D8 — idle LOW, which is what the boot strap needs
 #define PIN_US_ECHO    16   // D0 — via 1k/2k divider; pulseIn polls, no IRQ
 
-// Broadcast to everyone on-channel; the local node filters by LINK_NET_ID.
-static uint8_t s_broadcast[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+#if TANK_DEBUG
+  #define DBG(...) Serial1.printf(__VA_ARGS__)
+#else
+  #define DBG(...)
+#endif
 
 // ---- Flow ISR ----------------------------------------------
 static volatile uint32_t s_flowPulses = 0;   // window counter (reset each frame)
@@ -143,37 +141,12 @@ static void IRAM_ATTR flowIsr() {
 static uint16_t s_seq = 0;
 static uint32_t s_lastSendMs = 0;
 static uint32_t s_lastWindowMs = 0;
-static bool     s_lastSendOk = false;
-static uint8_t  s_channel = WIFI_CHANNEL;   // resolved ESP-NOW channel (updated by discovery)
-static uint32_t s_lastScanMs = 0;
 
 // Ultrasonic rolling-median state
 static uint16_t s_usBuf[US_SAMPLES] = {0};
 static uint8_t  s_usFill = 0;
 static uint8_t  s_usIdx  = 0;
 static uint16_t s_usDistMm = 0;   // last good median distance (0 = never read)
-
-// Scan for ROUTER_SSID and return the 2.4 GHz channel it's on, or 0 if the
-// SSID is blank / not found. Passive scan — no password required. Blocks
-// ~1.5-2 s while the radio hops all channels, so only called at boot (and,
-// if enabled, on the CHANNEL_RESCAN_MS cadence).
-static uint8_t discoverRouterChannel() {
-  if (sizeof(ROUTER_SSID) <= 1) return 0;   // empty define => skip discovery
-  Serial.printf("[TANK] scanning for SSID \"%s\"...\n", ROUTER_SSID);
-  int n = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/true);
-  uint8_t found = 0;
-  for (int i = 0; i < n; i++) {
-    if (WiFi.SSID(i) == ROUTER_SSID) {
-      found = (uint8_t)WiFi.channel(i);
-      Serial.printf("[TANK] found \"%s\" on channel %u (RSSI %d)\n",
-        ROUTER_SSID, found, WiFi.RSSI(i));
-      break;
-    }
-  }
-  if (!found) Serial.println(F("[TANK] SSID not found — using fallback WIFI_CHANNEL"));
-  WiFi.scanDelete();
-  return found;
-}
 
 // Resolve the four active-LOW floats into the LINK_FLOAT_* bitmap.
 // Matches v5 wiring exactly: water present grounds the input (reads LOW).
@@ -235,17 +208,19 @@ static uint8_t usLevelPct(uint16_t distMm) {
   return (uint8_t)(((uint32_t)(lowMm - distMm) * 100UL) / (uint32_t)(lowMm - fullMm));
 }
 
-static void onSent(uint8_t* /*mac*/, uint8_t status) {
-  s_lastSendOk = (status == 0);
-}
-
 void setup() {
-  Serial.begin(115200);
-  delay(200);
-  Serial.println();
-  Serial.println(F("================================"));
-  Serial.println(F("=== SWTC v6 TANK NODE (ESP8266) ==="));
-  Serial.println(F("================================"));
+  // Radio off entirely: the link is wired now, and this removes WiFi
+  // interrupt jitter from the flow ISR and the ultrasonic pulseIn timing.
+  WiFi.mode(WIFI_OFF);
+  WiFi.forceSleepBegin();
+  delay(10);
+
+  Serial.begin(LINK_SERIAL_BAUD);   // UART0 carries telemetry, not text
+
+#if TANK_DEBUG
+  Serial1.begin(115200);            // GPIO2 (D4), TX-only
+  DBG("\n=== SWTC v6 TANK NODE (ESP8266, wired link) ===\n");
+#endif
 
   pinMode(PIN_FLOAT_25,  INPUT_PULLUP);
   pinMode(PIN_FLOAT_50,  INPUT_PULLUP);
@@ -261,57 +236,16 @@ void setup() {
   digitalWrite(PIN_US_TRIG, LOW);
   pinMode(PIN_US_ECHO, INPUT);
 
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH); // off (active-LOW)
-
-  // ESP-NOW needs STA mode; we do NOT join the router on the tank node.
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-
-  // Auto-discover the router's 2.4 GHz channel (Option B); fall back to fixed.
-  uint8_t discovered = discoverRouterChannel();
-  s_channel = discovered ? discovered : (uint8_t)WIFI_CHANNEL;
-  s_lastScanMs = millis();
-  wifi_set_channel(s_channel);
-  Serial.printf("[TANK] ESP-NOW channel locked to %u (%s)\n",
-    s_channel, discovered ? "auto-discovered" : "fallback");
-
-  Serial.print(F("[TANK] MAC: "));
-  Serial.println(WiFi.macAddress());
-
-  if (esp_now_init() != 0) {
-    Serial.println(F("[TANK] ESP-NOW init FAILED — rebooting"));
-    delay(1000);
-    ESP.restart();
-  }
-  esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
-  esp_now_register_send_cb(onSent);
-  esp_now_add_peer(s_broadcast, ESP_NOW_ROLE_SLAVE, s_channel, NULL, 0);
+#if !TANK_DEBUG
+  pinMode(LED_BUILTIN, OUTPUT);      // GPIO2 doubles as UART1 TX when debugging
+  digitalWrite(LED_BUILTIN, HIGH);   // off (active-LOW)
+#endif
 
   s_lastWindowMs = millis();
-  Serial.println(F("[TANK] ready — broadcasting telemetry"));
 }
 
 void loop() {
   uint32_t now = millis();
-
-  // Optional runtime channel re-discovery (off by default). If the router
-  // changed channel while we stayed powered, re-lock to it. The scan pauses
-  // TX ~1-2 s, so the local node may log a brief link blip while this runs.
-#if CHANNEL_RESCAN_MS > 0
-  if (now - s_lastScanMs >= (uint32_t)CHANNEL_RESCAN_MS) {
-    s_lastScanMs = now;
-    uint8_t ch = discoverRouterChannel();
-    if (ch && ch != s_channel) {
-      Serial.printf("[TANK] channel changed %u -> %u, re-locking\n", s_channel, ch);
-      s_channel = ch;
-      wifi_set_channel(s_channel);
-      esp_now_del_peer(s_broadcast);
-      esp_now_add_peer(s_broadcast, ESP_NOW_ROLE_SLAVE, s_channel, NULL, 0);
-    }
-    now = millis();  // account for scan time so the send cadence stays sane
-  }
-#endif
 
   if (now - s_lastSendMs < TELEMETRY_PERIOD_MS) {
     delay(2);
@@ -352,20 +286,21 @@ void loop() {
   t.vbattMv      = 0;            // mains powered
   link_fillCrc(&t);
 
-  esp_now_send(s_broadcast, (uint8_t*)&t, sizeof(t));
+  Serial.write((const uint8_t*)&t, sizeof(t));
 
-  // Heartbeat: brief LED blink each transmit.
+#if !TANK_DEBUG
+  // Heartbeat: brief LED blink each frame sent.
   digitalWrite(LED_BUILTIN, LOW);
   delay(2);
   digitalWrite(LED_BUILTIN, HIGH);
+#endif
 
-  // Occasional serial diagnostics (every ~2 s) without flooding.
+  // Occasional diagnostics (every ~2 s) without flooding.
   static uint8_t dbg = 0;
   if (++dbg >= 8) {
     dbg = 0;
-    Serial.printf("[TANK] ch=%u seq=%u floats=0x%02X dist=%umm lvl=%u%% pulses=%lu total=%lu win=%lums send=%s\n",
-      s_channel, (unsigned)t.seq, t.floatBits, t.distanceMm, t.usLevelPct,
-      (unsigned long)pulses, (unsigned long)total, (unsigned long)windowMs,
-      s_lastSendOk ? "ok" : "?");
+    DBG("[TANK] seq=%u floats=0x%02X dist=%umm lvl=%u%% pulses=%lu total=%lu win=%lums\n",
+      (unsigned)t.seq, t.floatBits, t.distanceMm, t.usLevelPct,
+      (unsigned long)pulses, (unsigned long)total, (unsigned long)windowMs);
   }
 }

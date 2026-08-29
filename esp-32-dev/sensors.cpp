@@ -40,7 +40,11 @@ static uint8_t s_lastLevel = 0;
 static bool    s_levelPlausible = true;
 
 // ============== current sense (CT) ==========
+#define CT_AVG_SAMPLES 4
 static uint16_t s_lastCurrentMv = 0;
+static uint16_t s_ctOffsetMv    = 0;   // measured mid-rail, for diagnostics
+static uint16_t s_ctHist[CT_AVG_SAMPLES] = {0};
+static uint8_t  s_ctHistIdx = 0;
 static bool     s_currentPresent = false;
 
 // ============== feedback ====================
@@ -99,18 +103,29 @@ static uint8_t readFloats() {
 
 static uint16_t sampleCtRmsMv() {
 #if HAS_CT_CLAMP
-  // Sample for ~20 ms (one mains cycle at 50 Hz) — 100 samples @ ~5 kHz
-  const int N = 200;
-  uint32_t sumSq = 0;
-  uint16_t off = settings().ctOffsetMv;
-  for (int i = 0; i < N; i++) {
+  // AC RMS about the MEASURED mean (auto-zero) using the one-pass variance
+  // identity  Vrms = sqrt(mean(x^2) - mean(x)^2).  Deriving the centre from the
+  // samples means a bias divider that doesn't sit exactly on ctOffsetMv can't
+  // corrupt the reading — a fixed offset error adds in quadrature and would
+  // otherwise read as permanent "current present".
+  uint32_t sum   = 0;
+  uint64_t sumSq = 0;
+  uint32_t n     = 0;
+  uint32_t t0    = millis();
+  while ((uint32_t)(millis() - t0) < CT_SAMPLE_MS) {
     uint32_t mv = analogReadMilliVolts(PIN_CT_ADC);
-    int32_t  d  = (int32_t)mv - (int32_t)off;
-    sumSq += (uint32_t)(d * d);
-    delayMicroseconds(100);
+    sum   += mv;
+    sumSq += (uint64_t)mv * mv;
+    n++;
   }
-  uint32_t mean = sumSq / N;
-  return (uint16_t)sqrt((double)mean);
+  if (n == 0) return 0;
+
+  uint32_t mean   = sum / n;
+  uint64_t meanSq = sumSq / n;
+  int64_t  var    = (int64_t)meanSq - (int64_t)mean * (int64_t)mean;
+  if (var < 0) var = 0;
+  s_ctOffsetMv = (uint16_t)mean;
+  return (uint16_t)(sqrt((double)var) + 0.5);
 #else
   return 0;
 #endif
@@ -196,7 +211,13 @@ void sensors_tick() {
   static uint32_t lastCt = 0;
   if (elapsed(lastCt, 250)) {
     lastCt = millis();
-    s_lastCurrentMv = sampleCtRmsMv();
+    // Smooth over ~1 s: FreeRTOS preemption makes any single 40 ms window a
+    // noisy RMS estimate, and switching noise (NeoPixel/buzzer) rides the rail.
+    s_ctHist[s_ctHistIdx % CT_AVG_SAMPLES] = sampleCtRmsMv();
+    s_ctHistIdx++;
+    uint32_t ctSum = 0;
+    for (uint8_t i = 0; i < CT_AVG_SAMPLES; i++) ctSum += s_ctHist[i];
+    s_lastCurrentMv = (uint16_t)(ctSum / CT_AVG_SAMPLES);
     bool present = s_lastCurrentMv >= settings().ctThreshMv;
     if (present != s_currentPresent) {
       s_currentPresent = present;
@@ -247,6 +268,10 @@ void sensors_tick() {
 uint8_t  sensors_levelPct()       { return s_lastLevel; }
 bool     sensors_currentPresent() { return s_currentPresent; }
 uint16_t sensors_currentMv()      { return s_lastCurrentMv; }
+uint16_t sensors_currentOffsetMv(){ return s_ctOffsetMv; }
+uint16_t sensors_currentAmps()    {
+  return (uint16_t)(((uint32_t)s_lastCurrentMv * CT_AMPS_PER_MV_X1000 + 500) / 1000);
+}
 uint16_t sensors_flowLpmX10()     { return s_flowSmoothed; }  // smoothed + thresholded
 // Single source of truth for the "flow present" cutoff used by the state
 // machine + safety. Backed by the NVS setting flowNoFlowThresh (editable via

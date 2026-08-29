@@ -66,37 +66,42 @@ v6/
 
 ---
 
-## 1. ESP-NOW channel — auto-discovery (Option B)
+## 1. The wired link (replaced ESP-NOW in v6.1)
 
-ESP-NOW peers **must share one WiFi channel**. The local node (ESP32) joins your
-router as a station, so it automatically sits on **your router's 2.4 GHz
-channel**. Rather than making you find/lock that channel, the tank node
-**scans for your router's SSID on boot and locks ESP-NOW to whatever channel it
-finds** — so it just works.
+Telemetry travels over a **one-way 3.3 V UART** in the cable that already feeds
+power to the tank:
 
-1. Set your network name in `tank-node.ino` (the **password is not needed** —
-   scanning is passive):
-   ```c
-   #define ROUTER_SSID  "YourWiFiName"   // 2.4 GHz SSID to follow
-   #define WIFI_CHANNEL 1                // fallback if SSID not found
-   ```
-2. That's it. On boot the tank node prints e.g.
-   `found "YourWiFiName" on channel 6 … ESP-NOW channel locked to 6`. The local
-   node prints its associated channel too (`[MQ] WiFi connected: … ch=6 …`) so
-   you can confirm they match.
+```
+   NodeMCU TX (D10 / GPIO1)  ------------->  ESP32 GPIO32   (PIN_LINK_RX)
+   GND                       <----------->   GND            (already common)
+```
 
-**Dual-band routers are fine.** ESP8266/ESP32 are 2.4 GHz-only, so they never see
-the 5 GHz radio; the scan always returns the 2.4 GHz channel even when both bands
-share one SSID. You do **not** need to split SSIDs or disable 5 GHz.
+Both MCUs are 3.3 V logic, so this is a **direct connection — no level shifter**.
+A solid common ground is essential: UART is single-ended and has no voltage
+reference without it. You already have one via the power pair.
 
-**Optional runtime resilience.** By default the tank node discovers the channel
-once at boot (immune to *which* channel the router picked). If your router might
-**change** its 2.4 GHz channel while the tank node stays powered, set
-`CHANNEL_RESCAN_MS` (e.g. `300000` = 5 min) to periodically re-discover. Note a
-re-scan pauses telemetry ~1–2 s, which the local node briefly sees as a link
-blip (and, if the pump is running, would trigger a safe-stop) — hence it's off by
-default. A normal site-wide power event reboots the tank node anyway, which
-re-discovers on boot, so most installs never need this.
+- **Speed:** `LINK_SERIAL_BAUD` (9600) — shared in `link_proto.h` so both nodes
+  agree. The 26-byte frame at 4 Hz is ~104 B/s, about **10% of capacity**.
+- **Framing:** UART is a byte stream with no packet boundaries, so the three
+  constant leading fields (`netId`, `version`, `msgType`) double as a **3-byte
+  preamble**. The receiver hunts for that signature, collects
+  `sizeof(LinkTelemetry)` bytes, then checks the CRC16. A false preamble match
+  inside payload data simply fails CRC and the parser resynchronises.
+- **The tank node's UART0 carries the link**, so it prints no debug text and
+  blinks the onboard LED once per frame instead. Set `TANK_DEBUG 1` for text on
+  UART1 (GPIO2/D4) via a USB-TTL adapter — that disables the LED.
+- **The radio is switched off** on the tank node, which also removes WiFi
+  interrupt jitter from the flow ISR and the ultrasonic `pulseIn` timing.
+
+### Why the radio was dropped
+
+ESP-NOW measured **−93 dBm with ~66% packet loss** at the installed positions,
+with multi-second blackouts. Worse, attenuation varied with **tank level** (water
+absorbs 2.4 GHz), so the link degraded exactly when it mattered — and because
+`canStartPump()` gates on `link_alive()`, that blocks the pump. A bench RSSI
+sweep showed a textbook −6 dB-per-doubling falloff, confirming the radios were
+healthy and the site was simply too lossy. The wire is deterministic and reuses
+the installed cable.
 
 The tank node **broadcasts** (FF:FF:FF:FF:FF:FF) and the local node filters frames
 by `LINK_NET_ID`, so there are no MAC addresses to hard-code.
@@ -172,7 +177,8 @@ it exactly like v5's local floats.
 
 - Board: **NodeMCU 1.0 (ESP-12E Module)**
 - Flash size: 4MB, CPU 80 MHz, Upload 115200
-- Libraries: none beyond the **ESP8266 Arduino core** (`ESP8266WiFi`, `espnow`
+- Libraries: none beyond the **ESP8266 Arduino core** (`ESP8266WiFi` — used only
+  to switch the radio off)
   are bundled)
 
 ---
@@ -256,8 +262,8 @@ means a dropped frame never loses pulses.
 
 ## 6. Bring-up checklist
 
-1. Set `ROUTER_SSID` in `tank-node.ino` to your 2.4 GHz network name (channel
-   is auto-discovered; `WIFI_CHANNEL` is only the fallback).
+1. Wire the tank node's **TX (GPIO1)** to the local node's **GPIO32**, with a
+   common ground. No `ROUTER_SSID`/channel setup is needed any more.
 2. Flash the tank node. Open Serial @ 115200 — you should see periodic
    `[TANK] seq=… floats=0x… dist=…mm lvl=…% pulses=…` lines.
 3. Flash the local node. Open Serial @ 115200 — watch for
@@ -276,7 +282,7 @@ means a dropped frame never loses pulses.
 
 | Symptom                              | Likely cause / fix                                                |
 |--------------------------------------|-------------------------------------------------------------------|
-| Local node never sees `[LINK] UP`    | `ROUTER_SSID` typo/blank (tank fell back to `WIFI_CHANNEL`); compare the two nodes' printed `ch=` |
+| Local node never sees `[LINK] UP`    | TX not landing on GPIO32, no common GND, or baud mismatch (`LINK_SERIAL_BAUD`) |
 | Link flaps up/down                   | Router changed channel at runtime (set `CHANNEL_RESCAN_MS`); weak antenna; >15 ft with obstacles  |
 | Ultrasonic reads 0 / jumps around    | Missing 1k/2k ECHO divider or 100 µF cap; target closer than the ~20 cm dead zone |
 | Level stuck / implausible warnings   | Float wiring not active-LOW to GND; check pull-ups                 |

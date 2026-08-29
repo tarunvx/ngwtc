@@ -100,17 +100,16 @@ void led_tick() {
   // color mapping for water level (top-down fill — strip mounted inverted)
   // Index 0 = physical TOP, index NEO_COUNT-1 = physical BOTTOM
   // Level fills from top downward:
-  // 0%   = top 2 LEDs red blinking (empty warning)
+  // 0%   = bottom LED red blinking (empty warning)
   // <25% = top 2 LEDs red solid
   // 25%  = top 3 LEDs orange
   // 50%  = top 5 LEDs yellow
   // 75%  = top 7 LEDs blue
   // 100% = all 9 LEDs green
   if (lvl == 0) {
-    // Empty — blink red for attention (top 2)
+    // Empty — blink the single bottom LED
     uint32_t c = (millis()/500)%2 ? strip.Color(255,0,0) : 0;
     strip.setPixelColor(NEO_COUNT-1, c);
-    strip.setPixelColor(NEO_COUNT-2, c);
   } else if (lvl < 25) {
     strip.setPixelColor(NEO_COUNT-1, strip.Color(255,0,0));
     strip.setPixelColor(NEO_COUNT-2, strip.Color(255,0,0));

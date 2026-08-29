@@ -181,13 +181,15 @@ void ui_tick() {
     oled.setCursor(0, 18);
     oled.printf("LVL: %3u%%", sensors_levelPct());
 
-    // Row 2 (y=36): Flow (L/min) + Current (Volts)
+    // Row 2 (y=36): flow + current — same columns as the dashboard
     oled.setCursor(0, 36);
-    uint16_t fl = sensors_flowLpmX10();
-    uint16_t imv = sensors_currentMv();
-    oled.printf("F:%u.%02uL", fl/10, fl%10);
-    oled.setCursor(76, 36);
-    oled.printf("I:%u.%02uV", imv/1000, (imv%1000)/10);
+    uint16_t fl = (uint16_t)((sensors_flowLpmX10() + 5) / 10);
+    uint16_t ia = sensors_currentAmps();
+    if (fl > 99) fl = 99;
+    if (ia > 99) ia = 99;
+    oled.printf("FL:%2u", fl);
+    oled.setCursor(68, 36);
+    oled.printf("I:%2u", ia);
 
     // Row 3 (y=54): overflow-run / bypass warnings (font 1)
     oled.setTextSize(1);
@@ -233,14 +235,15 @@ void ui_tick() {
   oled.setCursor(92, 16);
   oled.print(mn4);
 
-  // Row 3 (y=32): flow (L/min) + current (Volts)
+  // Row 3 (y=32): flow (whole L/min) + current (whole amps)
   oled.setCursor(0, 32);
-  uint16_t fl = sensors_flowLpmX10();
-  uint16_t imv = sensors_currentMv();
-  // Format: x.xxL  x.xxV
-  oled.printf("%u.%02uL", fl/10, fl%10);
+  uint16_t fl  = (uint16_t)((sensors_flowLpmX10() + 5) / 10);
+  uint16_t ia  = sensors_currentAmps();
+  if (fl > 99) fl = 99;
+  if (ia > 99) ia = 99;
+  oled.printf("FL:%2u", fl);
   oled.setCursor(68, 32);
-  oled.printf("%u.%02uV", imv/1000, (imv%1000)/10);
+  oled.printf("I:%2u", ia);
 
   // Row 4 (y=48): temp + humidity (font 1 to fit both)
   oled.setTextSize(1);

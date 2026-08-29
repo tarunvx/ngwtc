@@ -53,6 +53,13 @@
 #define PIN_I2C_SDA      21
 #define PIN_I2C_SCL      22
 
+// v6 wired tank link — UART RX only (tank node's TX/GPIO1 lands here).
+// GPIO32 was the v5 float-25 input, freed when sensing moved to the tank node.
+#define PIN_LINK_RX      32
+// Parked TX pin: must be a real, unused GPIO. Passing -1 would leave UART1's TX
+// on its default GPIO10, which is the SPI flash bus on WROOM-32 (boot loop).
+#define PIN_LINK_TX      33
+
 #endif
 
 

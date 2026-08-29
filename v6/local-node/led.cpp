@@ -97,17 +97,42 @@ void led_tick() {
     return;
   }
 
+  // Bar source is selectable (NVS `levelSource`): floats give discrete 25%
+  // steps, the ultrasonic gives a continuous 0-100% fill. Display only —
+  // control/safety always use the floats.
+  if (settings().levelSource == LVL_ULTRASONIC) {
+    uint8_t pct = sensors_ultrasonicLevelPct();
+    if (pct == 0) {
+      uint32_t c = (millis()/500)%2 ? strip.Color(255,0,0) : 0;
+      strip.setPixelColor(NEO_COUNT-1, c);
+    } else {
+      uint32_t c;
+      if      (pct < 25)  c = strip.Color(255,0,0);
+      else if (pct < 50)  c = strip.Color(180,80,0);
+      else if (pct < 75)  c = strip.Color(180,180,0);
+      else if (pct < 100) c = strip.Color(0,0,120);
+      else                c = strip.Color(0,80,0);
+      uint8_t n = (uint8_t)(((uint16_t)pct * NEO_COUNT + 50) / 100);
+      if (n == 0) n = 1;
+      if (n > NEO_COUNT) n = NEO_COUNT;
+      for (uint8_t i = 0; i < n; i++)
+        strip.setPixelColor(NEO_COUNT-1-i, c);
+    }
+    strip.show();
+    return;
+  }
+
   // color mapping for water level (top-down fill — strip mounted inverted)
   // Index 0 = physical TOP, index NEO_COUNT-1 = physical BOTTOM
   // Level fills from top downward:
-  // 0%   = top 2 LEDs red blinking (empty warning)
+  // 0%   = bottom LED red blinking (empty warning)
   // <25% = top 2 LEDs red solid
   // 25%  = top 3 LEDs orange
   // 50%  = top 5 LEDs yellow
   // 75%  = top 7 LEDs blue
   // 100% = all 9 LEDs green
   if (lvl == 0) {
-    // Empty — blink red for attention (top 2)
+    // Empty — blink the single bottom LED
     uint32_t c = (millis()/500)%2 ? strip.Color(255,0,0) : 0;
     strip.setPixelColor(NEO_COUNT-1, c);
     strip.setPixelColor(NEO_COUNT-2, c);

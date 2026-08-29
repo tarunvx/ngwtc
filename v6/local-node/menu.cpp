@@ -22,6 +22,7 @@ enum MenuItem : uint8_t {
   MI_SLEEP_TOGGLE,
   MI_SMART_SENSE,
   MI_OVERFLOW_ONCE,
+  MI_LED_SOURCE,
   MI_BYPASS_CURRENT,
   MI_BYPASS_FLOW,
   MI_BYPASS_FEEDBACK,
@@ -51,6 +52,7 @@ static const char* kLabels[MI_COUNT] = {
   "Toggle SLEEP",
   "Smart-Sense",
   "Ignore Full 1x",
+  "LED: Flt/US",
   "Bypass I-Sense",
   "Bypass Flow",
   "Bypass Feedback",
@@ -171,6 +173,12 @@ static void activate() {
       // run past full. Self-clears on stop / arm timeout. AUTO unaffected.
       bool on = sm_toggleOverflowIgnore();
       ui_showPopup(on ? "Overflow ARM 1x" : "Overflow OFF");
+      break;
+    }
+    case MI_LED_SOURCE: {
+      bool wasUs = (settings().levelSource == LVL_ULTRASONIC);
+      settings_setU8("levelSource", wasUs ? LVL_FLOAT : LVL_ULTRASONIC);
+      ui_showPopup(wasUs ? "LED: Floats" : "LED: Ultrasonic");
       break;
     }
     case MI_BYPASS_CURRENT: {

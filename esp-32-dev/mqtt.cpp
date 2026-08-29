@@ -179,13 +179,13 @@ void mqtt_publishStatus() {
   char json[512];
   snprintf(json, sizeof(json),
     "{\"online\":true,\"mode\":\"%s\",\"state\":\"%s\",\"sleep\":%s,"
-    "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"faults\":%u,"
+    "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"i_off\":%u,\"faults\":%u,"
     "\"temp_cx10\":%d,\"rh_x10\":%u,\"pressure_mpa\":%d,"
     "\"bypass_i\":%s,\"bypass_f\":%s,\"overflow\":%s}",
     modeName(settings().mode), sm_stateName(sm_state()),
     settings().sleepMode ? "true" : "false",
     sensors_levelPct(), sensors_flowLpmX10(),
-    sensors_currentMv(), (unsigned)faultlog_count(),
+    sensors_currentMv(), sensors_currentOffsetMv(), (unsigned)faultlog_count(),
     (int)sensors_tempCx10(), (unsigned)sensors_rhX10(),
     (int)(sensors_pressureMPa() * 1000),  // mPa integer for JSON simplicity
     settings().bypassCurrentSense ? "true" : "false",

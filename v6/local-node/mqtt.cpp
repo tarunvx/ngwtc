@@ -180,14 +180,14 @@ void mqtt_publishStatus() {
   char json[512];
   snprintf(json, sizeof(json),
     "{\"online\":true,\"mode\":\"%s\",\"state\":\"%s\",\"sleep\":%s,"
-    "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"faults\":%u,"
+    "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"i_off\":%u,\"faults\":%u,"
     "\"temp_cx10\":%d,\"rh_x10\":%u,\"dist_mm\":%u,\"us_level\":%u,"
     "\"bypass_i\":%s,\"bypass_f\":%s,\"overflow\":%s,"
     "\"link\":%s,\"link_age_ms\":%lu,\"link_seq\":%u,\"link_drops\":%lu}",
     modeName(settings().mode), sm_stateName(sm_state()),
     settings().sleepMode ? "true" : "false",
     sensors_levelPct(), sensors_flowLpmX10(),
-    sensors_currentMv(), (unsigned)faultlog_count(),
+    sensors_currentMv(), sensors_currentOffsetMv(), (unsigned)faultlog_count(),
     (int)sensors_tempCx10(), (unsigned)sensors_rhX10(),
     (unsigned)sensors_distanceMm(), (unsigned)sensors_ultrasonicLevelPct(),
     settings().bypassCurrentSense ? "true" : "false",
@@ -231,18 +231,12 @@ static void connectIfNeeded() {
 
 void mqtt_tick() {
 #if HAS_MQTT
-  // One-time diagnostic: report the WiFi channel we associated on. ESP-NOW on
-  // the ESP32 follows the STA channel automatically, so this is the channel the
-  // tank node must match (its auto-discovery should land here). Handy for
-  // verifying the link during bring-up.
   static bool s_loggedChannel = false;
   if (!s_loggedChannel && WiFi.status() == WL_CONNECTED) {
     s_loggedChannel = true;
     Serial.printf("%s WiFi connected: SSID=%s ch=%d RSSI=%d IP=%s\n", LOG_TAG_MQ,
       WiFi.SSID().c_str(), WiFi.channel(), WiFi.RSSI(),
       WiFi.localIP().toString().c_str());
-    Serial.printf("%s -> tank node must broadcast on ESP-NOW channel %d\n",
-      LOG_TAG_MQ, WiFi.channel());
   }
 
   connectIfNeeded();

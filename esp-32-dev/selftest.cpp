@@ -27,9 +27,15 @@ uint32_t selftest_run() {
 
   // CT bias near mid-rail
 #if HAS_CT_CLAMP
-  uint32_t mv = analogReadMilliVolts(PIN_CT_ADC);
-  if (mv < (uint32_t)settings().ctOffsetMv - 300 ||
-      mv > (uint32_t)settings().ctOffsetMv + 300) fail |= ST_FAIL_CT_BIAS;
+  // Average many reads: the CT rides on an AC signal and a single ADC sample is
+  // noisy, so one outlier could false-fail the whole boot into MAINTENANCE.
+  uint32_t sum = 0;
+  for (uint8_t i = 0; i < 64; i++) sum += analogReadMilliVolts(PIN_CT_ADC);
+  uint32_t mv = sum / 64;
+  if (mv + 400 < (uint32_t)settings().ctOffsetMv ||
+      mv > (uint32_t)settings().ctOffsetMv + 400) fail |= ST_FAIL_CT_BIAS;
+  Serial.printf("[SELFTEST] CT bias %lumv (expect %u +/-400)\n",
+    (unsigned long)mv, settings().ctOffsetMv);
 #endif
 
   // Feedback switches should be released at boot (pump off)

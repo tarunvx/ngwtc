@@ -190,13 +190,12 @@ void sm_handleEvent(const Event& e) {
         fe.levelPct = sensors_levelPct();
         faultlog_record(fe);
       }
-      ui_showPopup("TANK LINK LOST", 5000);
+      // No popup: the dashboard link icon already shows this continuously.
       ui_requestUpdate();
       return;
 
     case EV_LINK_UP:
       Serial.printf("%s LINK UP (seq=%lu)\n", LOG_TAG_SM, (unsigned long)e.p.u32);
-      ui_showPopup("TANK LINK OK", 2000);
       ui_requestUpdate();
       return;
 

@@ -59,6 +59,10 @@ enum LevelSource {
                                         // sensors_flowThreshX10() (this is only a default seed)
 #define DEF_CT_OFFSET_MV        1650
 #define DEF_CT_THRESH_MV        80      // RMS over baseline
+// CT sampling window: 40 ms = 2 full mains cycles at 50 Hz.
+#define CT_SAMPLE_MS            40
+// Display scaling for the CT clamp: SCT-013-030 is 30 A : 1 V => 0.030 A/mV.
+#define CT_AMPS_PER_MV_X1000    30
 #define DEF_LEVEL_HYST          3       // %
 
 // ---- Queue / task sizing ----------------------------------
