@@ -235,6 +235,14 @@ void sm_handleEvent(const Event& e) {
       Serial.printf("%s BTN%u %s\n", LOG_TAG_SM,
         (unsigned)e.p.btn.id, e.p.btn.kind == PRESS_LONG ? "LONG" : "SHORT");
 
+      // Any key wakes the panel; B1 is the dedicated wake key, so its first
+      // press is consumed rather than also silencing / switching screens.
+      {
+        bool wasDim = ui_isDim();
+        ui_wake();
+        if (wasDim && e.p.btn.id == BTN1) return;
+      }
+
       // If menu is open (or about to open via B4 short), let menu consume input.
       if (menu_isOpen() || (e.p.btn.id == BTN4 && e.p.btn.kind == PRESS_SHORT)) {
         menu_handleButton(e.p.btn.id, e.p.btn.kind);

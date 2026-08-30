@@ -39,7 +39,7 @@ struct Settings {
   // v6: the pressure sensor was replaced by the ultrasonic, so this slot was
   // repurposed in place (same type/offset => NVS blob stays compatible).
   uint16_t ledAltMs;              // LED bar state<->level alternation period (ms)
-  uint16_t pressureFullMPa1000;   // reserved (unused in v6)
+  uint16_t uiDimMs;               // OLED idle time before dimming (ms)
 
   // Sensor bypass flags (for unreliable sensors during bring-up)
   bool     bypassCurrentSense;    // skip current-sense checks during actuation

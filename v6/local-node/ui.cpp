@@ -27,7 +27,31 @@ static uint32_t s_popupUntil = 0;
 static bool     s_opScreen = false;       // auto-enters when pump runs
 static bool     s_opScreenForced = false; // user forced home while running
 
+// OLED wear management. Panel aging tracks lit-pixel-hours, not refresh rate,
+// so we dim when idle and nudge the layout so static labels don't burn in.
+#define UI_DIM_MIN_MS 5000
+#define UI_DIM_MAX_MS 60000
+#define UI_SHIFT_MS   300000UL   // move the layout every 5 min
+#define UI_SHIFT_SPAN 3          // across 0..2 px
+static uint32_t s_lastActivity = 0;
+static bool     s_dim = false;
+static uint8_t  s_shiftX = 0;
+static uint32_t s_shiftAt = 0;
+
 void ui_requestUpdate() { s_uiDirty = true; }
+
+bool ui_isDim() { return s_dim; }
+
+void ui_wake() {
+  s_lastActivity = millis();
+  if (s_dim) {
+    s_dim = false;
+#if HAS_OLED
+    oled.dim(false);
+#endif
+    s_uiDirty = true;
+  }
+}
 
 void ui_toggleOpScreen() {
   s_opScreenForced = !s_opScreenForced;
@@ -58,6 +82,15 @@ void ui_init() {
   oled.println("   Labs");
   oled.display();
   vTaskDelay(pdMS_TO_TICKS(2000));
+#endif
+  s_lastActivity = millis();
+}
+
+// Cursor helper carrying the burn-in shift; right-edge items skip it so they
+// can't run off the panel.
+static void curs(int16_t x, int16_t y) {
+#if HAS_OLED
+  oled.setCursor(x + s_shiftX, y);
 #endif
 }
 
@@ -100,6 +133,25 @@ void ui_tick() {
   if (s_popupUntil && millis() >= s_popupUntil) {
     s_popup[0] = 0;
     s_popupUntil = 0;
+    s_uiDirty = true;
+  }
+
+  // Keep the panel bright while something matters; otherwise dim it to slow
+  // OLED wear. This is a contrast change, so content stays visible.
+  SystemState dimSt = sm_state();
+  bool important = sm_isPumpRunningState(dimSt) || dimSt == ST_STARTING ||
+                   dimSt == ST_STOPPING || dimSt == ST_ERROR ||
+                   dimSt == ST_FAULT_LATCHED || s_popup[0] ||
+                   menu_isOpen() || menu_isEditing();
+  if (important) s_lastActivity = millis();
+  uint32_t dimMs = settings().uiDimMs;
+  if (dimMs < UI_DIM_MIN_MS || dimMs > UI_DIM_MAX_MS) dimMs = DEF_UI_DIM_MS;
+  bool wantDim = sinceMs(s_lastActivity) > dimMs;
+  if (wantDim != s_dim) { s_dim = wantDim; oled.dim(s_dim); s_uiDirty = true; }
+
+  if (elapsed(s_shiftAt, UI_SHIFT_MS)) {
+    s_shiftAt = millis();
+    s_shiftX  = (uint8_t)((s_shiftX + 1) % UI_SHIFT_SPAN);
     s_uiDirty = true;
   }
 
@@ -183,7 +235,7 @@ void ui_tick() {
     // Row 0 (y=0): STATE + runtime (font 2)
     oled.setTextSize(2);
     oled.setTextColor(WHITE);
-    oled.setCursor(0, 0);
+    curs(0, 0);
     const char* sn = sm_stateName(curSt);
     char sn5[6]; strncpy(sn5, sn, 5); sn5[5] = 0;
     oled.print(sn5);
@@ -195,22 +247,22 @@ void ui_tick() {
 
     // Row 1 (y=18): Level (big)
     oled.setTextSize(2);
-    oled.setCursor(0, 18);
+    curs(0, 18);
     oled.printf("LVL: %3u%%", sensors_levelPct());
 
     // Row 2 (y=36): flow + current — same columns as the dashboard
-    oled.setCursor(0, 36);
+    curs(0, 36);
     uint16_t fl = (uint16_t)((sensors_flowLpmX10() + 5) / 10);
     uint16_t ia = sensors_currentAmps();
     if (fl > 99) fl = 99;
     if (ia > 99) ia = 99;
     oled.printf("FL:%2u", fl);
-    oled.setCursor(68, 36);
+    curs(68, 36);
     oled.printf("I:%2u", ia);
 
     // Row 3 (y=54): overflow-run / bypass warnings (font 1)
     oled.setTextSize(1);
-    oled.setCursor(0, 56);
+    curs(0, 56);
     bool bI = settings().bypassCurrentSense;
     bool bF = settings().bypassFlowSense;
     if (sm_overflowIgnore()) oled.print("** OVERFLOW RUN 1x **");
@@ -230,19 +282,19 @@ void ui_tick() {
   // Row 1 (y=0): level%   state   wifi
   oled.setTextSize(2);
   oled.setTextColor(WHITE);
-  oled.setCursor(0, 0);
+  curs(0, 0);
   oled.printf("%3u%%", sensors_levelPct());
   // State name (truncate to 4 chars for fit)
   const char* sn = sm_stateName(sm_state());
   char sn4[5]; strncpy(sn4, sn, 4); sn4[4] = 0;
-  oled.setCursor(52, 0);
+  curs(52, 0);
   oled.print(sn4);
   // Tank-node link indicator (left of WiFi), then WiFi symbol at top-right
   drawLink(104, 0, link_alive());
   drawWifi(118, 0, WiFi.isConnected());
 
   // Row 2 (y=16): ultrasonic level   mode
-  oled.setCursor(0, 16);
+  curs(0, 16);
   oled.printf("US:%3u%%", sensors_ultrasonicLevelPct());
   // Mode at right
   const char* mn = modeName(settings().mode);
@@ -251,18 +303,18 @@ void ui_tick() {
   oled.print(mn4);
 
   // Row 3 (y=32): flow (whole L/min) + current (whole amps)
-  oled.setCursor(0, 32);
+  curs(0, 32);
   uint16_t fl  = (uint16_t)((sensors_flowLpmX10() + 5) / 10);
   uint16_t ia  = sensors_currentAmps();
   if (fl > 99) fl = 99;
   if (ia > 99) ia = 99;
   oled.printf("FL:%2u", fl);
-  oled.setCursor(68, 32);
+  curs(68, 32);
   oled.printf("I:%2u", ia);
 
   // Row 4 (y=48): temp + humidity (font 1 to fit both)
   oled.setTextSize(1);
-  oled.setCursor(0, 48);
+  curs(0, 48);
   int16_t tc = sensors_tempCx10();
   uint16_t rh = sensors_rhX10();
   if (tc > -9990) {
@@ -272,7 +324,7 @@ void ui_tick() {
   }
 
   // Row 5 (y=56): overflow-armed banner (when armed) else day + time (NTP)
-  oled.setCursor(0, 56);
+  curs(0, 56);
   if (sm_overflowIgnore()) {
     oled.print("** OVERFLOW ARMED 1x");
   } else {

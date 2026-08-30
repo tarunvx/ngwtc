@@ -65,6 +65,7 @@ enum LevelSource {
 #define CT_AMPS_PER_MV_X1000    30
 #define DEF_LEVEL_HYST          3       // %
 #define DEF_LED_ALT_MS          2500    // LED bar state<->level alternation (ms)
+#define DEF_UI_DIM_MS           30000   // OLED dims after this much idle time (ms)
 
 // ---- Queue / task sizing ----------------------------------
 #define EVENT_QUEUE_LEN         32

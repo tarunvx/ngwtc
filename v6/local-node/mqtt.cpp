@@ -24,6 +24,16 @@
   static uint32_t s_backoff = 2000;
 #endif
 
+// ---------------- Fault streaming ----------------
+// Faults ride the ack feed, one per message: Adafruit_MQTT builds packets in a
+// small fixed buffer and silently truncates, so a whole-log dump would never
+// survive. The `FAULT:` prefix keeps them separable from `ACK:` lines.
+#define FAULT_PUB_GAP_MS 2000
+
+static uint32_t s_faultPubSeq  = 0;   // faultlog_seq() value already published
+static int32_t  s_faultReplay  = -1;  // >= 0 while streaming the log for GET:FAULTS
+static uint32_t s_lastFaultPub = 0;
+
 // ---------------- CMD parser ----------------
 
 // Format: CMD:<id>:<DOMAIN>:<ACTION>[:<arg0>[:<arg1>]]
@@ -131,8 +141,10 @@ bool mqtt_dispatchCmd(const char* line) {
 
   if (strcmp(dom, "GET") == 0) {
     if (strcmp(act, "FAULTS") == 0) {
+      size_t cnt = faultlog_count();
+      s_faultReplay = cnt ? 0 : -1;      // mqtt_tick streams them, paced, to the fault feed
       char tmp[64];
-      snprintf(tmp, sizeof(tmp), "FAULTS=%u", (unsigned)faultlog_count());
+      snprintf(tmp, sizeof(tmp), "FAULTS=%u", (unsigned)cnt);
       mqtt_publishAck(id, true, tmp);
       faultlog_dump(Serial);
       return true;
@@ -150,6 +162,7 @@ bool mqtt_dispatchCmd(const char* line) {
     if (strcmp(act, "RESET_FAULTS") == 0) {
       faultlog_clear();
       sm_clearLatched();
+      s_faultReplay = -1; s_faultPubSeq = 0;
       mqtt_publishAck(id, true, "OK");
       return true;
     }
@@ -238,6 +251,46 @@ static void connectIfNeeded() {
   if (r == 0) { s_backoff = 2000; mqtt_publishStatus(); }
   else        { uint32_t nb = s_backoff * 2; if (nb > 60000) nb = 60000; s_backoff = nb; }
 }
+
+static void publishFault(const FaultEntry& e, uint32_t ordinal, bool replay) {
+  char line[192];
+  snprintf(line, sizeof(line),
+    "FAULT:{\"n\":%lu,\"rp\":%u,\"ts\":%lu,\"c\":%u,\"cn\":\"%s\","
+    "\"sv\":%u,\"sn\":\"%s\",\"st\":\"%s\",\"lvl\":%u,\"fl\":%u,\"i\":%u}",
+    (unsigned long)ordinal, replay ? 1u : 0u, (unsigned long)e.ts,
+    (unsigned)e.code, faultCodeName(e.code),
+    (unsigned)e.severity, faultSevName(e.severity),
+    sm_stateName((SystemState)e.state),
+    (unsigned)e.levelPct, (unsigned)e.flowLpmX10, (unsigned)e.currentMv);
+  size_t jlen = strlen(line);
+  Serial.printf("%s (%u B) %s\n", LOG_TAG_MQ, (unsigned)jlen, line);
+  if (!s_pubAck.publish(line)) {
+    Serial.printf("%s FAULT publish FAILED (%u B)\n", LOG_TAG_MQ, (unsigned)jlen);
+  }
+  s_lastFaultPub = millis();
+}
+
+static void faultPubTick() {
+  if (!elapsed(s_lastFaultPub, FAULT_PUB_GAP_MS)) return;
+  size_t cnt = faultlog_count();
+  FaultEntry e;
+
+  if (s_faultReplay >= 0) {                    // GET:FAULTS replay, oldest first
+    if ((size_t)s_faultReplay >= cnt) { s_faultReplay = -1; return; }
+    if (faultlog_get((size_t)s_faultReplay, e)) publishFault(e, (uint32_t)s_faultReplay + 1, true);
+    if ((size_t)++s_faultReplay >= cnt) s_faultReplay = -1;
+    return;
+  }
+
+  uint32_t seq = faultlog_seq();
+  if (seq < s_faultPubSeq) s_faultPubSeq = seq;   // log was cleared
+  if (seq == s_faultPubSeq || cnt == 0) return;
+
+  uint32_t behind = seq - s_faultPubSeq;
+  if (behind > cnt) behind = cnt;                 // older ones already rotated out
+  if (faultlog_get(cnt - behind, e)) publishFault(e, (uint32_t)(cnt - behind) + 1, false);
+  s_faultPubSeq = seq - behind + 1;
+}
 #endif
 
 void mqtt_tick() {
@@ -261,5 +314,6 @@ void mqtt_tick() {
   }
   static uint32_t lastPub = 0;
   if (elapsed(lastPub, MQTT_PUBLISH_PERIOD_MS)) { lastPub = millis(); mqtt_publishStatus(); }
+  faultPubTick();
 #endif
 }

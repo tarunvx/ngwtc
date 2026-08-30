@@ -457,12 +457,38 @@ back. The common ones:
 | `CMD:1:PUMP:OVERFLOW` | Arm the one-shot "ignore full" override (§10). `:OFF` disarms it. |
 | `CMD:1:MODE:AUTO` | Switch mode (`AUTO`, `MANUAL`, `TIMER`, `SLEEP`, `MAINT`). |
 | `CMD:1:GET:STATUS` | Ask for a fresh status report. |
-| `CMD:1:GET:FAULTS` | Report the recent fault count/history. |
+| `CMD:1:GET:FAULTS` | Re-send the whole stored fault history to the ack feed. |
 | `CMD:1:SYS:RESET_FAULTS` | Clear faults. |
 | `CMD:1:SYS:REBOOT` | Restart the controller. |
 
 With the override armed, `PUMP:ON` will start **even when the tank is full**;
 otherwise it politely refuses with `NOT_IDLE`.
+
+### Fault reports
+
+Faults are published to the **acknowledgement feed** — the same one that answers
+your commands — so you don't need a serial cable to find out what went wrong.
+**Every fault is pushed the moment it happens**, one message per fault, tagged
+with a `FAULT:` prefix so it's easy to tell apart from `ACK:` replies:
+
+```
+FAULT:{"n":3,"rp":0,"ts":184320,"c":1,"cn":"DRY_RUN","sv":2,"sn":"ERROR",
+       "st":"STARTING","lvl":50,"fl":0,"i":272}
+```
+
+| Key | Meaning |
+|---|---|
+| `n` | Position in the stored log (1 = oldest kept) |
+| `rp` | `1` if this is a replay of history, `0` if it just happened |
+| `ts` | Controller uptime in ms when it occurred |
+| `c` / `cn` | Fault code number / name (`DRY_RUN`, `NO_CURRENT`, …) |
+| `sv` / `sn` | Severity number / name (`INFO`, `WARN`, `ERROR`, `PANIC`) |
+| `st` | State the controller was in |
+| `lvl`, `fl`, `i` | Tank level %, flow (L/min ×10), motor current in mV at that moment |
+
+`CMD:1:GET:FAULTS` replays the stored history (up to 32 entries) to the same
+feed with `"rp":1`, paced one message every 2 seconds so the broker doesn't
+throttle it. The acknowledgement tells you how many are coming (`FAULTS=7`).
 
 ---
 

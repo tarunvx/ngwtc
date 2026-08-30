@@ -29,6 +29,7 @@ enum MenuItem : uint8_t {
   MI_SET_CUTOFF_MIN,
   MI_SET_CUTOFF_MAX,
   MI_SET_LED_ALT,
+  MI_SET_UI_DIM,
   MI_SET_FLOW_THRESH,
   MI_SET_PULSE_ON,
   MI_SET_PULSE_OFF,
@@ -60,6 +61,7 @@ static const char* kLabels[MI_COUNT] = {
   "MIN Water Level",
   "MAX Water Level",
   "LED Alt (ms)",
+  "Screen Dim (s)",
   "Flow Threshold",
   "Pulse ON (ms)",
   "Pulse OFF (ms)",
@@ -128,6 +130,7 @@ static void startEdit(const char* title, const char* unit,
 static void commitCutoffMin(int32_t v) { settings_setU8("cutoffMinPct", (uint8_t)v); }
 static void commitCutoffMax(int32_t v) { settings_setU8("cutoffMaxPct", (uint8_t)v); }
 static void commitLedAlt(int32_t v)    { settings_setU16("ledAltMs", (uint16_t)v); }
+static void commitUiDim(int32_t v)     { settings_setU16("uiDimMs", (uint16_t)(v * 1000)); }
 static void commitFlowThresh(int32_t v){ settings_setU16("flowNoFlowThresh", (uint16_t)v); }
 static void commitPulseOn(int32_t v)   { settings_setU32("pulseOnMs", (uint32_t)v); }
 static void commitPulseOff(int32_t v)  { settings_setU32("pulseOffMs", (uint32_t)v); }
@@ -214,6 +217,12 @@ static void activate() {
     case MI_SET_LED_ALT:
       startEdit("LED Alt", "ms", settings().ledAltMs, 500, 10000, 500, commitLedAlt);
       return;
+    case MI_SET_UI_DIM: {
+      uint16_t v = settings().uiDimMs;
+      if (v < 5000 || v > 60000) v = DEF_UI_DIM_MS;   // legacy/unset NVS slot
+      startEdit("Screen Dim", "s", v / 1000, 5, 60, 5, commitUiDim);
+      return;
+    }
     case MI_SET_FLOW_THRESH:
       startEdit("No-Flow Thr", "x10Lpm", settings().flowNoFlowThresh, 0, 100, 5, commitFlowThresh);
       return;

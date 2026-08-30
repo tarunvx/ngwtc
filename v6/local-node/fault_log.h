@@ -23,4 +23,11 @@ void  faultlog_dump(Stream& s);
 size_t faultlog_count();
 bool  faultlog_get(size_t idx, FaultEntry& out);
 
+// Monotonic since boot (0 at reset, also reset by faultlog_clear) so consumers
+// such as MQTT can spot new entries without re-scanning the ring.
+uint32_t faultlog_seq();
+
+const char* faultCodeName(uint8_t code);
+const char* faultSevName(uint8_t sev);
+
 #endif
