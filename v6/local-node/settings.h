@@ -36,9 +36,10 @@ struct Settings {
   bool     mcuUpsPresent;
   uint8_t  levelSource;     // LevelSource
 
-  // Pressure-to-tank-% mapping (MPa * 1000 = milli-MPa for integer storage)
-  uint16_t pressureEmptyMPa1000;  // pressure reading when tank empty (0%)
-  uint16_t pressureFullMPa1000;   // pressure reading when tank full (100%)
+  // v6: the pressure sensor was replaced by the ultrasonic, so this slot was
+  // repurposed in place (same type/offset => NVS blob stays compatible).
+  uint16_t ledAltMs;              // LED bar state<->level alternation period (ms)
+  uint16_t pressureFullMPa1000;   // reserved (unused in v6)
 
   // Sensor bypass flags (for unreliable sensors during bring-up)
   bool     bypassCurrentSense;    // skip current-sense checks during actuation

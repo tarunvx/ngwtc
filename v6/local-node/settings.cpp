@@ -30,8 +30,8 @@ static void loadDefaults() {
   s_cfg.adaptiveDryRun  = DEFAULT_ADAPTIVE_DRYRUN;
   s_cfg.mcuUpsPresent   = DEFAULT_MCU_UPS_PRESENT;
   s_cfg.levelSource     = DEFAULT_LEVEL_SOURCE;
-  s_cfg.pressureEmptyMPa1000 = 0;     // 0 MPa = empty
-  s_cfg.pressureFullMPa1000  = 100;   // 0.100 MPa = full (adjust per install)
+  s_cfg.ledAltMs        = DEF_LED_ALT_MS;
+  s_cfg.pressureFullMPa1000  = 100;   // reserved (unused in v6)
   s_cfg.bypassCurrentSense   = false;
   s_cfg.bypassFlowSense      = false;
   s_cfg.bypassFeedback       = false;
@@ -102,7 +102,7 @@ bool settings_setU16(const char* k, uint16_t v) {
        _matchU16(k, "flowKppl",   s_cfg.flowKppl,   v)
     || _matchU16(k, "ctOffsetMv", s_cfg.ctOffsetMv, v)
     || _matchU16(k, "ctThreshMv", s_cfg.ctThreshMv, v)
-    || _matchU16(k, "pressureEmptyMPa1000", s_cfg.pressureEmptyMPa1000, v)
+    || _matchU16(k, "ledAltMs", s_cfg.ledAltMs, v)
     || _matchU16(k, "pressureFullMPa1000",  s_cfg.pressureFullMPa1000,  v)
     || _matchU16(k, "flowNoFlowThresh",     s_cfg.flowNoFlowThresh,     v);
   if (ok) settings_save();

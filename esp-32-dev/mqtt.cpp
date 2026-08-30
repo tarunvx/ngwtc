@@ -177,28 +177,39 @@ void mqtt_publishAck(uint16_t id, bool ok, const char* msg) {
 
 void mqtt_publishStatus() {
   char json[512];
+  // Keys are abbreviated and booleans sent as 1/0: Adafruit_MQTT builds each
+  // packet in a small fixed buffer and silently truncates anything larger.
   snprintf(json, sizeof(json),
-    "{\"online\":true,\"mode\":\"%s\",\"state\":\"%s\",\"sleep\":%s,"
-    "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"i_off\":%u,\"faults\":%u,"
-    "\"temp_cx10\":%d,\"rh_x10\":%u,\"pressure_mpa\":%d,"
-    "\"bypass_i\":%s,\"bypass_f\":%s,\"overflow\":%s}",
+    "{\"md\":\"%s\",\"st\":\"%s\",\"slp\":%u,"
+    "\"lvl\":%u,\"fl\":%u,\"i\":%u,\"io\":%u,\"f\":%u,"
+    "\"t\":%d,\"rh\":%u,\"p\":%d,"
+    "\"bi\":%u,\"bf\":%u,\"ov\":%u}",
     modeName(settings().mode), sm_stateName(sm_state()),
-    settings().sleepMode ? "true" : "false",
+    settings().sleepMode ? 1u : 0u,
     sensors_levelPct(), sensors_flowLpmX10(),
     sensors_currentMv(), sensors_currentOffsetMv(), (unsigned)faultlog_count(),
     (int)sensors_tempCx10(), (unsigned)sensors_rhX10(),
     (int)(sensors_pressureMPa() * 1000),  // mPa integer for JSON simplicity
-    settings().bypassCurrentSense ? "true" : "false",
-    settings().bypassFlowSense ? "true" : "false",
-    sm_overflowIgnore() ? "true" : "false");
-  Serial.printf("%s STATUS %s\n", LOG_TAG_MQ, json);
+    settings().bypassCurrentSense ? 1u : 0u,
+    settings().bypassFlowSense ? 1u : 0u,
+    sm_overflowIgnore() ? 1u : 0u);
+  size_t jlen = strlen(json);
+  Serial.printf("%s STATUS (%u B) %s\n", LOG_TAG_MQ, (unsigned)jlen, json);
 #if HAS_MQTT
   if (s_mqtt.connected()) {
-    s_pubStatus.publish(json);
+    // Adafruit_MQTT builds packets in a small fixed buffer (MAXBUFFERSIZE) and
+    // silently truncates anything larger, so the serial log can look healthy
+    // while the broker receives malformed JSON. Report the result.
+    if (!s_pubStatus.publish(json)) {
+      Serial.printf("%s STATUS publish FAILED (%u B - payload too long?)\n",
+        LOG_TAG_MQ, (unsigned)jlen);
+    }
     // Publish level to dedicated topic (for cross-system tank level sharing)
     char lvlBuf[8];
     snprintf(lvlBuf, sizeof(lvlBuf), "%u", sensors_levelPct());
-    s_pubLevel.publish(lvlBuf);
+    if (!s_pubLevel.publish(lvlBuf)) {
+      Serial.printf("%s LEVEL publish FAILED\n", LOG_TAG_MQ);
+    }
   }
 #endif
 }

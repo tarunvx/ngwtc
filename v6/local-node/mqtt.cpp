@@ -15,10 +15,10 @@
   #include "Adafruit_MQTT_Client.h"
   static WiFiClient            s_wifi;
   static Adafruit_MQTT_Client  s_mqtt(&s_wifi, MQTT_HOST, MQTT_PORT, MQTT_USER, MQTT_KEY);
-  static Adafruit_MQTT_Publish   s_pubStatus(&s_mqtt, MQTT_FEED_BASE "/next-gen-water-tank-controller.swtc-slash-status");
-  static Adafruit_MQTT_Publish   s_pubAck   (&s_mqtt, MQTT_FEED_BASE "/next-gen-water-tank-controller.swtc-slash-ack");
-  static Adafruit_MQTT_Publish   s_pubLevel (&s_mqtt, MQTT_FEED_BASE "/next-gen-water-tank-controller.swtc-slash-level");
-  static Adafruit_MQTT_Subscribe s_subCmd   (&s_mqtt, MQTT_FEED_BASE "/next-gen-water-tank-controller.swtc-slash-cmd");
+  static Adafruit_MQTT_Publish   s_pubStatus(&s_mqtt, MQTT_FEED_BASE "/ngwtc.status");
+  static Adafruit_MQTT_Publish   s_pubAck   (&s_mqtt, MQTT_FEED_BASE "/ngwtc.ack");
+  static Adafruit_MQTT_Publish   s_pubLevel (&s_mqtt, MQTT_FEED_BASE "/ngwtc.level");
+  static Adafruit_MQTT_Subscribe s_subCmd   (&s_mqtt, MQTT_FEED_BASE "/ngwtc.cmd");
 
   static uint32_t s_lastConnectTry = 0;
   static uint32_t s_backoff = 2000;
@@ -178,32 +178,43 @@ void mqtt_publishAck(uint16_t id, bool ok, const char* msg) {
 
 void mqtt_publishStatus() {
   char json[512];
+  // Keys are abbreviated and booleans sent as 1/0: Adafruit_MQTT builds each
+  // packet in a small fixed buffer and silently truncates anything larger.
   snprintf(json, sizeof(json),
-    "{\"online\":true,\"mode\":\"%s\",\"state\":\"%s\",\"sleep\":%s,"
-    "\"level\":%u,\"flow_x10\":%u,\"i_mv\":%u,\"i_off\":%u,\"faults\":%u,"
-    "\"temp_cx10\":%d,\"rh_x10\":%u,\"dist_mm\":%u,\"us_level\":%u,"
-    "\"bypass_i\":%s,\"bypass_f\":%s,\"overflow\":%s,"
-    "\"link\":%s,\"link_age_ms\":%lu,\"link_seq\":%u,\"link_drops\":%lu}",
+    "{\"md\":\"%s\",\"st\":\"%s\",\"slp\":%u,"
+    "\"lvl\":%u,\"fl\":%u,\"i\":%u,\"io\":%u,\"f\":%u,"
+    "\"t\":%d,\"rh\":%u,\"d\":%u,\"us\":%u,"
+    "\"bi\":%u,\"bf\":%u,\"ov\":%u,"
+    "\"lk\":%u,\"la\":%lu,\"ls\":%u,\"ld\":%lu}",
     modeName(settings().mode), sm_stateName(sm_state()),
-    settings().sleepMode ? "true" : "false",
+    settings().sleepMode ? 1u : 0u,
     sensors_levelPct(), sensors_flowLpmX10(),
     sensors_currentMv(), sensors_currentOffsetMv(), (unsigned)faultlog_count(),
     (int)sensors_tempCx10(), (unsigned)sensors_rhX10(),
     (unsigned)sensors_distanceMm(), (unsigned)sensors_ultrasonicLevelPct(),
-    settings().bypassCurrentSense ? "true" : "false",
-    settings().bypassFlowSense ? "true" : "false",
-    sm_overflowIgnore() ? "true" : "false",
-    link_alive() ? "true" : "false",
+    settings().bypassCurrentSense ? 1u : 0u,
+    settings().bypassFlowSense ? 1u : 0u,
+    sm_overflowIgnore() ? 1u : 0u,
+    link_alive() ? 1u : 0u,
     (unsigned long)(link_everReceived() ? link_ageMs() : 0),
     (unsigned)link_seq(), (unsigned long)link_dropCount());
-  Serial.printf("%s STATUS %s\n", LOG_TAG_MQ, json);
+  size_t jlen = strlen(json);
+  Serial.printf("%s STATUS (%u B) %s\n", LOG_TAG_MQ, (unsigned)jlen, json);
 #if HAS_MQTT
   if (s_mqtt.connected()) {
-    s_pubStatus.publish(json);
+    // Adafruit_MQTT builds packets in a small fixed buffer (MAXBUFFERSIZE) and
+    // silently truncates anything larger, so the serial log can look healthy
+    // while the broker receives malformed JSON. Report the result.
+    if (!s_pubStatus.publish(json)) {
+      Serial.printf("%s STATUS publish FAILED (%u B - payload too long?)\n",
+        LOG_TAG_MQ, (unsigned)jlen);
+    }
     // Publish level to dedicated topic (for cross-system tank level sharing)
     char lvlBuf[8];
     snprintf(lvlBuf, sizeof(lvlBuf), "%u", sensors_levelPct());
-    s_pubLevel.publish(lvlBuf);
+    if (!s_pubLevel.publish(lvlBuf)) {
+      Serial.printf("%s LEVEL publish FAILED\n", LOG_TAG_MQ);
+    }
   }
 #endif
 }

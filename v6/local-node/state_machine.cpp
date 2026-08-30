@@ -207,6 +207,10 @@ void sm_handleEvent(const Event& e) {
         else if (m == MODE_MAINTENANCE)         enterState(ST_MAINTENANCE);
         else                                    enterState(ST_IDLE);
       } else {
+        // Surface which check failed — bit 2=CT bias, 3=feedback stuck, 4=NVS.
+        char buf[24];
+        snprintf(buf, sizeof(buf), "SELFTEST 0x%02X", (unsigned)e.p.u32);
+        ui_showPopup(buf, 6000);
         enterState(ST_MAINTENANCE);
       }
       return;

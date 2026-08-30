@@ -12,6 +12,11 @@
   static Adafruit_NeoPixel strip(NEO_COUNT, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 #endif
 
+// Fallback when the stored period is unset/out of range (e.g. a legacy NVS
+// blob where this slot still holds the old pressure value).
+#define LED_ALT_MIN_MS 200
+#define LED_ALT_MAX_MS 20000
+
 void led_init() {
 #if HAS_NEOPIXEL
   strip.begin();
@@ -68,31 +73,26 @@ void led_tick() {
   uint8_t lvl = sensors_levelPct();
   strip.clear();
 
-  // Fault and special states override normal color mapping
-  if (st == ST_FAULT_LATCHED) {
-    uint32_t c = (millis()/200)%2 ? strip.Color(255,0,0) : 0;
-    for (uint8_t i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, c);
-    strip.show();
-    return;
-  }
-  if (st == ST_ERROR) {
-    uint32_t c = (millis()/600)%2 ? strip.Color(255,0,0) : 0;
-    for (uint8_t i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, c);
-    strip.show();
-    return;
-  }
-  if (st == ST_SLEEP) {
-    strip.setPixelColor(NEO_COUNT-1, strip.Color(0,30,40));
-    strip.show();
-    return;
-  }
-  if (st == ST_MAINTENANCE) {
-    for (uint8_t i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, strip.Color(255,80,0));
-    strip.show();
-    return;
-  }
-  if (st == ST_FULL) {
-    for (uint8_t i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, strip.Color(0,50,0));
+  // Special states alternate with the level bar (LED_ALT_MS each way) so the
+  // level stays readable instead of being hidden for as long as the state lasts.
+  bool stateOverride = (st == ST_FAULT_LATCHED || st == ST_ERROR ||
+                        st == ST_SLEEP || st == ST_MAINTENANCE || st == ST_FULL);
+  uint32_t altMs = settings().ledAltMs;
+  if (altMs < LED_ALT_MIN_MS || altMs > LED_ALT_MAX_MS) altMs = DEF_LED_ALT_MS;
+  if (stateOverride && ((millis() / altMs) % 2) == 0) {
+    if (st == ST_FAULT_LATCHED) {
+      uint32_t c = (millis()/200)%2 ? strip.Color(255,0,0) : 0;
+      for (uint8_t i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, c);
+    } else if (st == ST_ERROR) {
+      uint32_t c = (millis()/600)%2 ? strip.Color(255,0,0) : 0;
+      for (uint8_t i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, c);
+    } else if (st == ST_SLEEP) {
+      strip.setPixelColor(NEO_COUNT-1, strip.Color(0,30,40));
+    } else if (st == ST_MAINTENANCE) {
+      for (uint8_t i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, strip.Color(255,80,0));
+    } else {  // ST_FULL
+      for (uint8_t i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, strip.Color(0,50,0));
+    }
     strip.show();
     return;
   }

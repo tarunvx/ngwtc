@@ -64,6 +64,7 @@ enum LevelSource {
 // Display scaling for the CT clamp: SCT-013-030 is 30 A : 1 V => 0.030 A/mV.
 #define CT_AMPS_PER_MV_X1000    30
 #define DEF_LEVEL_HYST          3       // %
+#define DEF_LED_ALT_MS          2500    // LED bar state<->level alternation (ms)
 
 // ---- Queue / task sizing ----------------------------------
 #define EVENT_QUEUE_LEN         32
