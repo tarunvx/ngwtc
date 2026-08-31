@@ -31,6 +31,7 @@
 #include "buzzer.h"
 #include "mqtt.h"
 #include "link.h"
+#include "ota.h"
 #include "state_machine.h"
 #include "tasks.h"
 #include "menu.h"
@@ -67,6 +68,7 @@ void setup() {
   led_init();
   ui_init();
   mqtt_init();            // also connects WiFi (STA mode)
+  ota_init();             // network firmware update; needs WiFi configured
   link_init();            // wired tank link (UART); independent of WiFi
   initNTP();              // start NTP after WiFi
   sm_init();

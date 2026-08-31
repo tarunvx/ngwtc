@@ -42,7 +42,7 @@
 
 // Wire speed — both nodes must agree. 9600 carries the ~26 B @ 4 Hz telemetry
 // with ~10x headroom and was bench-proven error-free over the installed run.
-#define LINK_SERIAL_BAUD    9600
+#define LINK_SERIAL_BAUD    2400
 
 // ---- Float bit map (bit set = float submerged / contact CLOSED) ----
 //  Mirrors v5 active-LOW float wiring: water grounds the input.

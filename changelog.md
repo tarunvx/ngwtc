@@ -8,7 +8,96 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.3.0** (`esp-32-dev/`) · **v6.4.0** (`v6/local-node/`) · **v6.1.0** (`v6/tank-node/`)
+Current: **v5.3.0** (`esp-32-dev/`) · **v6.8.0** (`v6/local-node/`) · **v6.2.0** (`v6/tank-node/`)
+
+---
+# Version 6.8.0 — v6/local-node
+## Detect a floating link RX line
+
+INT_WDT returned with the buzzer still unplugged, but only after the tank node
+was physically removed — the 31-minute clean run had it connected. Disconnecting
+it leaves `PIN_LINK_RX` (GPIO32) holding ~10 m of cable as an antenna against
+only the internal pull-up. Spurious UART traffic would starve the FreeRTOS tick
+that feeds the interrupt watchdog, which matches the observed `c1:IDLE+293`
+(core 1 never scheduled, i.e. stuck in ISR context rather than in our code).
+
+### Added
+- `link_rawBytes()` — counts every byte drained from the link UART, valid frame
+  or not. Reported by `GET:DIAG` as `rx=`. With no tank node attached this
+  should stay at 0; if it climbs, the RX line is picking up noise and the theory
+  is confirmed.
+
+---
+# Version 6.7.0 — v6/local-node
+## Breadcrumb: mark IDLE on core 0 too
+
+With the buzzer unplugged and the tank node removed, INT_WDT returned with a new
+and repeatable signature — `c0:BUZZ+0 c1:IDLE+292` and `c0:BUZZ+0 c1:IDLE+295`.
+`c1:IDLE` means core 1 was frozen rather than stuck in our code, but `c0:BUZZ`
+was uninterpretable: core-0 tasks did not mark `IDLE`, so core 0's mark only ever
+said "this task ticked most recently", not whether core 0 was running at all.
+(The buzzer is physically disconnected, so it certainly was not executing.)
+
+### Changed
+- Every core-0 task now marks `BC_IDLE` before its `vTaskDelay()`, matching
+  core 1. `c0:IDLE + c1:IDLE` now unambiguously means both application cores were
+  parked and a **system task** (WiFi/lwIP/NVS) held interrupts off — which our
+  own `BC_NVS` marks would otherwise have caught.
+
+---
+# Version 6.6.0 / tank 6.2.0 — v6 both nodes
+## Link baud 9600 → 2400: ~24% of frames were being lost
+
+30 minutes of status telemetry showed `ls` (tank sequence) climbing perfectly
+monotonically — 30 → 8995 at exactly 4 Hz — so the tank node was **never**
+rebooting, which is what the repeated `LINK_LOST` had implied. Instead `ld`
+(drops) rose 3 → 2152 over the same window:
+
+    loss = 2149 / 8965 = ~24% of frames
+    implied byte error rate = 0.76^(1/26) => ~1%
+
+That also predicts the dropouts: a `LINK_LOST` needs 4 consecutive misses, and
+0.24^4 x 7200 frames = ~24 expected runs against ~15 observed (plus 3 suppressed).
+
+~1% byte errors on a *wired* link is a signal-integrity problem, not power.
+
+### Changed
+- `LINK_SERIAL_BAUD` 9600 → **2400** in all three `link_proto.h` copies. Longer
+  bit periods tolerate both noise and any baud/clock mismatch far better. A
+  26-byte frame takes 108 ms at 2400 baud, still well inside the 250 ms
+  telemetry period.
+- `LINK_TIMEOUT_MS` 1000 → **2000** (4 → 8 frames). Even at the old loss rate
+  this makes a spurious drop ~2000x less likely (0.24^8).
+
+> **Both nodes must be flashed together.** Baud is not covered by
+> `LINK_PROTO_VERSION`, so a mismatched pair simply stops talking.
+
+---
+# Version 6.5.0 — v6/local-node
+## Network firmware update (ArduinoOTA)
+
+The board is installed and USB is unreachable, so every test build meant
+unplugging it. OTA turns that into a one-command upload over WiFi.
+
+### Added
+- `ota.{h,cpp}` — ArduinoOTA listener, `ota_init()` after `mqtt_init()` (needs
+  WiFi), `ota_tick()` driven from the **MQTT task**, which is deliberately the
+  one task not registered with the watchdog.
+- `tasks_prepareForOta()` / `tasks_resumeAfterOta()`. An update writes ~1 MB;
+  each flash write parks the other core, so the 8 s task watchdog on Control and
+  Safety would fire partway through. `onStart` unregisters both from the WDT and
+  suspends every task except the MQTT task running the update.
+- Safety gate: `ota_tick()` will not even call `ArduinoOTA.handle()` while the
+  pump is driven (`sm_isPumpRunningState()`, `ST_STARTING`/`ST_STOPPING`, or a
+  pulse in flight). A reboot mid-pulse would leave the latching relay in an
+  unknown state.
+- `OTA_HOSTNAME` / `OTA_PASSWORD` in `SECRETS.example.h`.
+
+### Changed
+- `OTA_ENABLED` 0 → 1.
+
+> **Requires one last USB flash** with an OTA-capable partition scheme — the
+> default single-app layout has nowhere to stage the new image.
 
 ---
 # Version 6.4.0 / 5.3.0 — both trees

@@ -28,6 +28,7 @@ static volatile uint8_t  s_flags       = 0;
 static volatile uint32_t s_lastRxMs    = 0;
 static volatile bool     s_everRx      = false;
 static volatile uint32_t s_dropCount   = 0;
+static volatile uint32_t s_rawBytes    = 0;   // every byte seen, valid frame or not
 static volatile uint16_t s_prevSeq     = 0;
 static volatile bool     s_havePrevSeq = false;
 
@@ -107,7 +108,7 @@ void link_init() {
 void link_tick() {
   if (!s_linkInit) return;
 
-  while (LINK_SERIAL.available()) parseByte((uint8_t)LINK_SERIAL.read());
+  while (LINK_SERIAL.available()) { s_rawBytes++; parseByte((uint8_t)LINK_SERIAL.read()); }
 
   bool alive = link_alive();
   if (alive != s_alivePrev) {
@@ -210,3 +211,7 @@ uint32_t link_dropCount() {
   portEXIT_CRITICAL(&s_mux);
   return v;
 }
+
+// Climbs even with no tank node attached if the RX line is floating and picking
+// up noise — a spurious-UART-traffic detector.
+uint32_t link_rawBytes() { return s_rawBytes; }

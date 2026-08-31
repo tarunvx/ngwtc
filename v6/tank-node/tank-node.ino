@@ -100,7 +100,7 @@
 #include "link_proto.h"
 
 // ---- USER CONFIG -------------------------------------------
-#define FIRMWARE_VERSION    "6.1.0"  // bump MINOR on every change to this node
+#define FIRMWARE_VERSION    "6.2.0"  // bump MINOR on every change to this node
 #define TANK_DEBUG          0       // 1 = text debug on UART1 (GPIO2), disables LED
 #define TELEMETRY_PERIOD_MS 250     // ~4 Hz telemetry
 #define NOFLOW_PPS_FLOOR    1       // pulses/sec below this => not "active"

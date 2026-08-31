@@ -8,7 +8,7 @@
 
 // Single source of truth for this tree's version. Bump the MINOR digit on
 // every change; MAJOR only for a redesign. Reported by GET:DIAG as fw=.
-#define FIRMWARE_VERSION  "6.4.0"
+#define FIRMWARE_VERSION  "6.8.0"
 
 // ---- Feature flags (compile-time) --------------------------
 #define HAS_OLED        1   // SSD1306 via I2C
@@ -17,7 +17,7 @@
 #define HAS_MQTT        1   // Adafruit MQTT + WiFi
 #define HAS_FLOW_ISR    1   // YF-S201
 #define HAS_CT_CLAMP    1   // SCT-013 via ADC
-#define OTA_ENABLED     0   // partition reserved; enable later
+#define OTA_ENABLED     1   // ArduinoOTA network update (needs an OTA partition scheme)
 
 // ---- Runtime feature toggles (overridable via NVS settings) ----
 #define DEFAULT_HW_TIMER_PRESENT   false   // 555/ATtiny upper-bound timer

@@ -12,6 +12,7 @@
 #include "buzzer.h"
 #include "mqtt.h"
 #include "link.h"
+#include "ota.h"
 #include "selftest.h"
 #include "fault_log.h"
 #include "settings.h"
@@ -76,17 +77,19 @@ static void safetyTask(void*) {
 }
 
 // ============== CORE 0 ==============
+// These mark BC_IDLE before their delay too, so a stale mark means the core was
+// genuinely frozen rather than just "this task ticked last".
 static void buttonTask(void*) {
-  for (;;) { bc_mark(BC_BUTTONS); buttons_tick(); vTaskDelay(pdMS_TO_TICKS(10)); }
+  for (;;) { bc_mark(BC_BUTTONS); buttons_tick(); bc_mark(BC_IDLE); vTaskDelay(pdMS_TO_TICKS(10)); }
 }
 static void uiTask(void*) {
-  for (;;) { bc_mark(BC_UI); ui_tick(); vTaskDelay(pdMS_TO_TICKS(100)); }
+  for (;;) { bc_mark(BC_UI); ui_tick(); bc_mark(BC_IDLE); vTaskDelay(pdMS_TO_TICKS(100)); }
 }
 static void ledTask(void*) {
-  for (;;) { bc_mark(BC_LED); led_tick(); vTaskDelay(pdMS_TO_TICKS(50)); }
+  for (;;) { bc_mark(BC_LED); led_tick(); bc_mark(BC_IDLE); vTaskDelay(pdMS_TO_TICKS(50)); }
 }
 static void buzzerTask(void*) {
-  for (;;) { bc_mark(BC_BUZZ); buzzer_autoTick(); buzzer_tick(); vTaskDelay(pdMS_TO_TICKS(20)); }
+  for (;;) { bc_mark(BC_BUZZ); buzzer_autoTick(); buzzer_tick(); bc_mark(BC_IDLE); vTaskDelay(pdMS_TO_TICKS(20)); }
 }
 static void mqttTask(void*) {
   // Also owns the deferred fault-log commit: flash erase stalls both cores, so
@@ -95,11 +98,13 @@ static void mqttTask(void*) {
   for (;;) {
     bc_mark(BC_MQTT);
     mqtt_tick();
+    ota_tick();
     if (millis() - lastFlush > 10000) {
       lastFlush = millis();
       bc_mark(BC_FLUSH);
       faultlog_flush();
     }
+    bc_mark(BC_IDLE);
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
@@ -130,4 +135,21 @@ void initTasks() {
   xTaskCreatePinnedToCore(ledTask,     "LED",     STK_LED,     nullptr, 1, &hLED,    0);
   xTaskCreatePinnedToCore(buzzerTask,  "Buzz",    STK_BUZZER,  nullptr, 1, &hBuzz,   0);
   xTaskCreatePinnedToCore(mqttTask,    "MQTT",    STK_MQTT,    nullptr, 2, &hMQTT,   0);
+}
+
+// Called from the MQTT task, which runs the update and so must stay alive.
+void tasks_prepareForOta() {
+  if (hControl) esp_task_wdt_delete(hControl);
+  if (hSafety)  esp_task_wdt_delete(hSafety);
+
+  TaskHandle_t stop[] = { hSensor, hControl, hSafety, hButton, hUI, hLED, hBuzz };
+  for (TaskHandle_t h : stop) if (h) vTaskSuspend(h);
+}
+
+void tasks_resumeAfterOta() {
+  TaskHandle_t go[] = { hSensor, hControl, hSafety, hButton, hUI, hLED, hBuzz };
+  for (TaskHandle_t h : go) if (h) vTaskResume(h);
+
+  if (hControl) esp_task_wdt_add(hControl);
+  if (hSafety)  esp_task_wdt_add(hSafety);
 }

@@ -13,4 +13,9 @@
 #define MQTT_KEY        "your_aio_key"
 #define MQTT_FEED_BASE  "your_username/feeds/swtc"
 
+// Network firmware update (ArduinoOTA). OTA_PASSWORD may be omitted, but then
+// anyone on the LAN can reflash the controller.
+#define OTA_HOSTNAME    "swtc-local"
+#define OTA_PASSWORD    "choose_one"
+
 #endif

@@ -153,11 +153,12 @@ bool mqtt_dispatchCmd(const char* line) {
     if (strcmp(act, "STATUS") == 0) { mqtt_publishStatus(); mqtt_publishAck(id, true, "OK"); return true; }
     if (strcmp(act, "DIAG") == 0) {
       char tmp[140];
-      snprintf(tmp, sizeof(tmp), "fw=%s rst=%s heap=%lu min=%lu up=%lus sup=%lu bc=%s",
+      snprintf(tmp, sizeof(tmp), "fw=%s rst=%s heap=%lu min=%lu up=%lus sup=%lu bc=%s rx=%lu",
         FIRMWARE_VERSION,
         faultlog_resetReasonName(), (unsigned long)ESP.getFreeHeap(),
         (unsigned long)ESP.getMinFreeHeap(), (unsigned long)(millis() / 1000),
-        (unsigned long)faultlog_suppressed(), bc_report());
+        (unsigned long)faultlog_suppressed(), bc_report(),
+        (unsigned long)link_rawBytes());
       mqtt_publishAck(id, true, tmp);
       return true;
     }
