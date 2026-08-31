@@ -8,7 +8,29 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.2.2** (`esp-32-dev/`) · **v6.2.0** (`v6/local-node/`) · **v6.1.0** (`v6/tank-node/`)
+Current: **v5.2.2** (`esp-32-dev/`) · **v6.3.0** (`v6/local-node/`) · **v6.1.0** (`v6/tank-node/`)
+
+---
+# Version 6.3.0 — v6/local-node
+## Breadcrumb: separate "parked" from "stuck", and see NVS writes
+
+The first breadcrumb read `c0:LED+0 c1:ACT+294` — core 1 frozen 294 ms against a
+300 ms INT_WDT. But `actuator_tick()` early-returns when no pulse is active, so
+the mark was really covering the following `vTaskDelay()`: core 1 was *parked*,
+not stuck. That is the signature of a flash write on the other core, which calls
+`spi_flash_disable_interrupts_caches_and_other_cpu()`.
+
+### Added
+- `BC_NVS` — marked inside `settings_save()` and the fault-log `persist()`, the
+  two places that write flash, so a stall there names itself.
+- `BC_IDLE` — marked before `vTaskDelay()` in the core-1 tasks (Sensor, Control,
+  Safety). Core-0 tasks deliberately keep marking their own subsystem so the
+  *initiating* core stays identifiable.
+
+### Fixed
+- `bc_report()` printed a core that had never marked as a huge age (`NONE+4182`,
+  which read like a 4.2 s stall but only meant "core 0's tasks did not exist
+  yet"). It now prints `-`.
 
 ---
 # Version 6.2.0 — v6/local-node

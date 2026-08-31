@@ -29,6 +29,7 @@ static void sensorTask(void*) {
   for (;;) {
     bc_mark(BC_SENSORS);
     sensors_tick();
+    bc_mark(BC_IDLE);
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
@@ -58,6 +59,7 @@ static void controlTask(void*) {
     bc_mark(BC_ACT);
     actuator_tick();
     esp_task_wdt_reset();
+    bc_mark(BC_IDLE);
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
@@ -68,6 +70,7 @@ static void safetyTask(void*) {
     bc_mark(BC_SAFETY);
     safety_tick();
     esp_task_wdt_reset();
+    bc_mark(BC_IDLE);
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 }

@@ -11,6 +11,8 @@
 enum BcPhase : uint8_t {
   BC_NONE = 0, BC_SETUP, BC_SELFTEST, BC_SENSORS, BC_LINK, BC_SM, BC_ACT,
   BC_SAFETY, BC_BUTTONS, BC_UI, BC_LED, BC_BUZZ, BC_MQTT, BC_FLUSH,
+  BC_NVS,    // inside a flash write — parks the other core, kills interrupts
+  BC_IDLE,   // core-1 tasks park here in vTaskDelay between ticks
   BC_COUNT
 };
 

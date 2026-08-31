@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "breadcrumb.h"
 #include <Preferences.h>
 
 #define NVS_NS  "swtc"
@@ -56,6 +57,7 @@ void settings_init() {
 
 void settings_save() {
   s_cfg.magic = MAGIC;
+  bc_mark(BC_NVS);
   s_prefs.putBytes("blob", &s_cfg, sizeof(s_cfg));
 }
 

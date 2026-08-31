@@ -1,4 +1,5 @@
 #include "fault_log.h"
+#include "breadcrumb.h"
 #include <Preferences.h>
 #include <esp_system.h>
 
@@ -69,6 +70,7 @@ void faultlog_recordBootReason() {
 static void persist() {
   if (!s_count) return;
   uint16_t last = (uint16_t)((s_head + FAULT_LOG_SIZE - 1) % FAULT_LOG_SIZE);
+  bc_mark(BC_NVS);
   s_p.putBytes("last", &s_buf[last], sizeof(FaultEntry));
 }
 
