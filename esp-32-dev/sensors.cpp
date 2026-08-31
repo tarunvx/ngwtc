@@ -10,6 +10,9 @@
 #if HAS_DHT22
   #include <DHT.h>
   static DHT dht(PIN_DHT22, DHT22);
+  #define DHT_PERIOD_MS    2500    // normal poll (sensor minimum is 2 s)
+  #define DHT_BACKOFF_MS  30000    // slow poll once the sensor looks dead
+  #define DHT_FAIL_LIMIT      5    // consecutive failures before backing off
 #endif
 
 // ============== Pressure sensor ================
@@ -147,28 +150,32 @@ void sensors_tick() {
     s_pressureMPa = mpa;
   }
 
-  // ---- DHT22 (every 2s — sensor minimum interval) ----
+  // ---- DHT22 (display-only) ----
+  // The library bit-bangs this read with interrupts DISABLED, so a marginal
+  // sensor can hold them off long enough to trip the 300 ms INT_WDT. Keep the
+  // exposure to one transaction per cycle and back off once it starts failing.
 #if HAS_DHT22
-  static uint32_t lastDht = 0;
-  static uint8_t  dhtFails = 0;
-  if (elapsed(lastDht, 2500)) {  // 2.5s to give sensor extra recovery time
+  static uint32_t lastDht   = 0;
+  static uint32_t dhtPeriod = DHT_PERIOD_MS;
+  static uint8_t  dhtFails  = 0;
+  if (elapsed(lastDht, dhtPeriod)) {
     lastDht = millis();
-    // DHT22 is timing-sensitive; retry up to 3 times
-    for (uint8_t attempt = 0; attempt < 3; attempt++) {
-      float h = dht.readHumidity();
-      float t = dht.readTemperature();
-      if (!isnan(h) && !isnan(t)) {
-        s_tempCx10 = (int16_t)(t * 10.0f);
-        s_rhX10    = (uint16_t)(h * 10.0f);
-        dhtFails = 0;
-        break;
+    // Single attempt: the library caches for 2 s, so an immediate retry returns
+    // the same stale failure while still costing interrupts-off time.
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    if (!isnan(h) && !isnan(t)) {
+      s_tempCx10 = (int16_t)(t * 10.0f);
+      s_rhX10    = (uint16_t)(h * 10.0f);
+      if (dhtFails >= DHT_FAIL_LIMIT) Serial.println(F("[SEN] DHT22 recovered"));
+      dhtFails  = 0;
+      dhtPeriod = DHT_PERIOD_MS;
+    } else if (dhtFails < 255) {
+      dhtFails++;
+      if (dhtFails == DHT_FAIL_LIMIT) {
+        dhtPeriod = DHT_BACKOFF_MS;
+        Serial.println(F("[SEN] DHT22: persistent read failures, backing off"));
       }
-      delayMicroseconds(100);  // brief gap before retry
-    }
-    if (dhtFails < 255) dhtFails++;
-    // Log persistent failures (first 5 only to avoid spam)
-    if (dhtFails == 5) {
-      Serial.println(F("[SEN] DHT22: persistent read failures"));
     }
   }
 #endif

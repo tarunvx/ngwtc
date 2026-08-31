@@ -80,6 +80,9 @@ void ui_init() {
   oled.setCursor(0, 0);
   oled.println("Tarun");
   oled.println("   Labs");
+  oled.setTextSize(1);
+  oled.println();
+  oled.println("NGWTC : v" FIRMWARE_VERSION);
   oled.display();
   vTaskDelay(pdMS_TO_TICKS(2000));
 #endif

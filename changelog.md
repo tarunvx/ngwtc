@@ -8,7 +8,34 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.2.2** (`esp-32-dev/`) · **v6.3.0** (`v6/local-node/`) · **v6.1.0** (`v6/tank-node/`)
+Current: **v5.3.0** (`esp-32-dev/`) · **v6.4.0** (`v6/local-node/`) · **v6.1.0** (`v6/tank-node/`)
+
+---
+# Version 6.4.0 / 5.3.0 — both trees
+## Root cause of the INT_WDT resets: the DHT22 read
+
+Breadcrumb `c0:BUZZ+0 c1:SENS+302` — core 1 spent 302 ms inside `sensors_tick()`
+against a 300 ms INT_WDT. The mark was `SENS`, not `IDLE`, so it was genuinely
+executing rather than parked, which ruled out the earlier flash-write theory.
+Everything else in `sensors_tick()` is `digitalRead`s, arithmetic and the CT
+busy-wait (interrupts enabled) — the DHT22 bit-bang is the only code in that
+function that disables interrupts (Adafruit's `InterruptLock`). A marginal
+sensor makes `expectPulse()` grind through its per-pulse timeouts with
+interrupts off, and the 3-attempt retry loop multiplied the exposure.
+
+### Changed
+- **One DHT transaction per cycle** instead of 3 retries. The library caches
+  readings for 2 s, so the retries returned the same stale failure anyway while
+  still costing interrupts-off time — they added risk and no benefit.
+- **Failure backoff:** after `DHT_FAIL_LIMIT` (5) consecutive failures the poll
+  interval drops from 2.5 s to 30 s, cutting exposure ~12x. Logs on recovery.
+  DHT is display-only, so slower polling costs nothing operationally.
+
+### Fixed
+- `dhtFails` was incremented unconditionally *after* the success `break`, so it
+  never actually sat at 0 after a good read — the "persistent read failures"
+  message could fire on a healthy sensor, and any backoff keyed on it would
+  have been wrong.
 
 ---
 # Version 6.3.0 — v6/local-node
