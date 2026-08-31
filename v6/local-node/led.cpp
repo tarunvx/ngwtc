@@ -17,6 +17,17 @@
 #define LED_ALT_MIN_MS 200
 #define LED_ALT_MAX_MS 20000
 
+void led_blank() {
+#if HAS_NEOPIXEL
+  // WS2812s hold their last colour through a warm reset, so the strip stays lit
+  // for the whole of setup() unless it is explicitly cleared first.
+  strip.begin();
+  strip.setBrightness(40);
+  strip.clear();
+  strip.show();
+#endif
+}
+
 void led_init() {
 #if HAS_NEOPIXEL
   strip.begin();

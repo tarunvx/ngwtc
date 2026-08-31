@@ -27,6 +27,15 @@ bool  faultlog_get(size_t idx, FaultEntry& out);
 // such as MQTT can spot new entries without re-scanning the ring.
 uint32_t faultlog_seq();
 
+// Commits any deferred entries. Call periodically from a non-critical task.
+void faultlog_flush();
+uint32_t faultlog_suppressed();
+
+// Logs why the last boot happened and records abnormal causes (brownout,
+// watchdog, panic) so they reach MQTT. Call once, after faultlog_init().
+void faultlog_recordBootReason();
+const char* faultlog_resetReasonName();
+
 const char* faultCodeName(uint8_t code);
 const char* faultSevName(uint8_t sev);
 

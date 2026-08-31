@@ -1,23 +1,27 @@
 /*
 
-  Project - Smart Water Tank Monitor & Controller v6.0
+  Project - Smart Water Tank Monitor & Controller (v6, two-node)
 
   Author: Tarun Vishwakarma
 
   Start - 19th April 2026
 
-  v6: two-node wireless design. This LOCAL NODE keeps all the brains
+  v6: two-node design. This LOCAL NODE keeps all the brains
   (state machine, relays, CT clamp, UI, MQTT, safety) but now receives
-  the level floats, pressure and flow from a tank-side ESP8266 node over
-  ESP-NOW (see link.cpp / v6/tank-node). Wired CAT6 analog runs are gone.
+  the level floats, ultrasonic level and flow from a tank-side ESP8266 node
+  over a wired UART (see link.cpp / v6/tank-node). Wired CAT6 analog runs
+  are gone.
+
+  Version lives in config.h as FIRMWARE_VERSION.
 
 */
 
 #include <Arduino.h> 
 #include <WiFi.h>
-#include "config.h" 
-#include "settings.h" 
+#include "config.h"
+#include "settings.h"
 #include "fault_log.h"
+#include "breadcrumb.h"
 #include "event_queue.h"
 #include "sensors.h" 
 #include "actuator.h"
@@ -40,17 +44,21 @@ static void initNTP() {
 void setup() {
 
   Serial.begin(115200);
+  bc_captureBoot();     // must run before anything marks a new breadcrumb
+  led_blank();          // a warm reset leaves the strip lit; drop that load now
   delay(500);  // allow USB-CDC to enumerate
   Serial.println();
   Serial.println();
   Serial.println(F("================================"));
-  Serial.println(F("=== SWTC v6.0 boot ==="));
+  Serial.printf("=== SWTC v%s boot ===\n", FIRMWARE_VERSION);
   Serial.println(F("=== Baud: 115200 ==="));
   Serial.println(F("================================"));
   Serial.flush();
 
   settings_init();
   faultlog_init();
+  faultlog_recordBootReason();
+  Serial.printf("[BC] last breadcrumb: %s\n", bc_report());
   initEventQueue();
   sensors_init();
   actuator_init();        

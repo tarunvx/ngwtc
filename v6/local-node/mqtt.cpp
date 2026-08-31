@@ -6,6 +6,7 @@
 #include "state_machine.h"
 #include "sensors.h"
 #include "fault_log.h"
+#include "breadcrumb.h"
 #include "time_utils.h"
 #include "link.h"
 
@@ -150,6 +151,16 @@ bool mqtt_dispatchCmd(const char* line) {
       return true;
     }
     if (strcmp(act, "STATUS") == 0) { mqtt_publishStatus(); mqtt_publishAck(id, true, "OK"); return true; }
+    if (strcmp(act, "DIAG") == 0) {
+      char tmp[140];
+      snprintf(tmp, sizeof(tmp), "fw=%s rst=%s heap=%lu min=%lu up=%lus sup=%lu bc=%s",
+        FIRMWARE_VERSION,
+        faultlog_resetReasonName(), (unsigned long)ESP.getFreeHeap(),
+        (unsigned long)ESP.getMinFreeHeap(), (unsigned long)(millis() / 1000),
+        (unsigned long)faultlog_suppressed(), bc_report());
+      mqtt_publishAck(id, true, tmp);
+      return true;
+    }
     mqtt_publishAck(id, false, "UNKNOWN_GET"); return true;
   }
 
@@ -181,7 +192,7 @@ bool mqtt_dispatchCmd(const char* line) {
 // ---------------- Lifecycle ----------------
 
 void mqtt_publishAck(uint16_t id, bool ok, const char* msg) {
-  char line[96];
+  char line[160];   // GET:DIAG is the longest ack; still under the Adafruit_MQTT limit
   snprintf(line, sizeof(line), "ACK:%u:%s:%s", (unsigned)id, ok ? "OK" : "ERR", msg ? msg : "");
   Serial.printf("%s %s\n", LOG_TAG_MQ, line);
 #if HAS_MQTT

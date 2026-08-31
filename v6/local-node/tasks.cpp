@@ -16,6 +16,7 @@
 #include "fault_log.h"
 #include "settings.h"
 #include "time_utils.h"
+#include "breadcrumb.h"
 #include <esp_task_wdt.h>
 #if __has_include(<esp_idf_version.h>)
   #include <esp_idf_version.h>
@@ -26,6 +27,7 @@ static TaskHandle_t hSensor, hControl, hSafety, hButton, hUI, hLED, hBuzz, hMQTT
 // ============== CORE 1 ==============
 static void sensorTask(void*) {
   for (;;) {
+    bc_mark(BC_SENSORS);
     sensors_tick();
     vTaskDelay(pdMS_TO_TICKS(50));
   }
@@ -35,6 +37,7 @@ static void controlTask(void*) {
   esp_task_wdt_add(nullptr);
 
   // Boot self-test
+  bc_mark(BC_SELFTEST);
   uint32_t fail = selftest_run();
   Event ev{}; ev.type = EV_SELFTEST_RESULT; ev.p.u32 = fail;
   sendEvent(ev);
@@ -46,9 +49,13 @@ static void controlTask(void*) {
 
   Event e{};
   for (;;) {
+    bc_mark(BC_SM);
     if (receiveEvent(e, 50)) sm_handleEvent(e);
+    bc_mark(BC_LINK);
     link_tick();    // v6: detect tank-node link up/down, emit EV_LINK_*
+    bc_mark(BC_SM);
     sm_tick();
+    bc_mark(BC_ACT);
     actuator_tick();
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -58,6 +65,7 @@ static void controlTask(void*) {
 static void safetyTask(void*) {
   esp_task_wdt_add(nullptr);
   for (;;) {
+    bc_mark(BC_SAFETY);
     safety_tick();
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -66,19 +74,31 @@ static void safetyTask(void*) {
 
 // ============== CORE 0 ==============
 static void buttonTask(void*) {
-  for (;;) { buttons_tick(); vTaskDelay(pdMS_TO_TICKS(10)); }
+  for (;;) { bc_mark(BC_BUTTONS); buttons_tick(); vTaskDelay(pdMS_TO_TICKS(10)); }
 }
 static void uiTask(void*) {
-  for (;;) { ui_tick(); vTaskDelay(pdMS_TO_TICKS(100)); }
+  for (;;) { bc_mark(BC_UI); ui_tick(); vTaskDelay(pdMS_TO_TICKS(100)); }
 }
 static void ledTask(void*) {
-  for (;;) { led_tick(); vTaskDelay(pdMS_TO_TICKS(50)); }
+  for (;;) { bc_mark(BC_LED); led_tick(); vTaskDelay(pdMS_TO_TICKS(50)); }
 }
 static void buzzerTask(void*) {
-  for (;;) { buzzer_autoTick(); buzzer_tick(); vTaskDelay(pdMS_TO_TICKS(20)); }
+  for (;;) { bc_mark(BC_BUZZ); buzzer_autoTick(); buzzer_tick(); vTaskDelay(pdMS_TO_TICKS(20)); }
 }
 static void mqttTask(void*) {
-  for (;;) { mqtt_tick(); vTaskDelay(pdMS_TO_TICKS(50)); }
+  // Also owns the deferred fault-log commit: flash erase stalls both cores, so
+  // it must not happen on Control/Safety.
+  uint32_t lastFlush = 0;
+  for (;;) {
+    bc_mark(BC_MQTT);
+    mqtt_tick();
+    if (millis() - lastFlush > 10000) {
+      lastFlush = millis();
+      bc_mark(BC_FLUSH);
+      faultlog_flush();
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
 }
 
 void initTasks() {
@@ -86,7 +106,9 @@ void initTasks() {
 #if defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
   esp_task_wdt_config_t wdt_cfg = {
     .timeout_ms     = (uint32_t)(TASK_WDT_TIMEOUT_S * 1000),
-    .idle_core_mask = (1U << portNUM_PROCESSORS) - 1U,
+    // Idle tasks stay UNwatched: a flash erase disables the cache on both cores
+    // and starves them, which must not panic the controller.
+    .idle_core_mask = 0,
     .trigger_panic  = true,
   };
   esp_task_wdt_reconfigure(&wdt_cfg);   // core auto-inits WDT; reconfigure is safe

@@ -4,7 +4,32 @@ All notable changes to the **Next Gen Water Tank Controller (NGWTC)** firmware.
 Entries are grouped by change set. Unless noted, changes apply to both the
 v5 (`esp-32-dev/`) and v6 (`v6/local-node/`) trees.
 
-Current Version Prod - v5.2.2
+Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev/`
+and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
+every change; MAJOR only for a redesign.
+
+Current: **v5.2.2** (`esp-32-dev/`) · **v6.2.0** (`v6/local-node/`) · **v6.1.0** (`v6/tank-node/`)
+
+---
+# Version 6.2.0 — v6/local-node
+## Crash breadcrumb for INT_WDT diagnosis
+
+### Added
+- `breadcrumb.{h,cpp}` — per-core "what was running" marker in `RTC_NOINIT_ATTR`
+  memory, which survives a watchdog/panic reset but not a power cycle.
+  `bc_mark()` is called from `tasks.cpp` before every subsystem tick, so the
+  instrumentation lives in one file instead of being scattered.
+- `bc_captureBoot()` runs first in `setup()` and formats the previous boot as
+  `c0:<phase>+<age> c1:<phase>+<age>`. Because `INT_WDT` freezes both cores at
+  once, **the core with the larger age is the suspect**.
+- Reported on serial as `[BC] last breadcrumb:` and over MQTT in `GET:DIAG`.
+
+### Changed
+- `GET:DIAG` now leads with `fw=<FIRMWARE_VERSION>`; `mqtt_publishAck()` line
+  buffer 96 → 160 B to fit it.
+- Boot banner and sketch header now read `FIRMWARE_VERSION` instead of a
+  hardcoded string (applied to both trees).
+
 ---
 # Version 5.2.2
 ## LED level bar — count & fill direction

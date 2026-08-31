@@ -1,12 +1,12 @@
 /*
 
-  Project - Smart Water Tank Monitor & Controller v5.1
+  Project - Smart Water Tank Monitor & Controller (v5, single-board)
 
   Author: Tarun Vishwakarma
 
   Start - 19th April 2026
 
-  Version 5.2 - 25th July 2026
+  Version lives in config.h as FIRMWARE_VERSION.
 
 */
 
@@ -36,17 +36,19 @@ static void initNTP() {
 void setup() {
 
   Serial.begin(115200);
+  led_blank();          // a warm reset leaves the strip lit; drop that load now
   delay(500);  // allow USB-CDC to enumerate
   Serial.println();
   Serial.println();
   Serial.println(F("================================"));
-  Serial.println(F("=== SWTC v5.1 boot ==="));
+  Serial.printf("=== SWTC v%s boot ===\n", FIRMWARE_VERSION);
   Serial.println(F("=== Baud: 115200 ==="));
   Serial.println(F("================================"));
   Serial.flush();
 
   settings_init();
   faultlog_init();
+  faultlog_recordBootReason();
   initEventQueue();
   sensors_init();
   actuator_init();        

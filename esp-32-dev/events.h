@@ -55,6 +55,7 @@ enum FaultCode : uint8_t {
   FC_BROWNOUT,
   FC_MQTT_DISCONNECT,
   FC_INTERLOCK_VIOLATION,
+  FC_PANIC,                // CPU exception / abort() on the previous boot
 };
 
 enum FaultSeverity : uint8_t { SEV_INFO = 0, SEV_WARN = 1, SEV_ERROR = 2, SEV_PANIC = 3 };

@@ -76,7 +76,14 @@ static void buzzerTask(void*) {
   for (;;) { buzzer_autoTick(); buzzer_tick(); vTaskDelay(pdMS_TO_TICKS(20)); }
 }
 static void mqttTask(void*) {
-  for (;;) { mqtt_tick(); vTaskDelay(pdMS_TO_TICKS(50)); }
+  // Also owns the deferred fault-log commit: flash erase stalls both cores, so
+  // it must not happen on Control/Safety.
+  uint32_t lastFlush = 0;
+  for (;;) {
+    mqtt_tick();
+    if (millis() - lastFlush > 10000) { lastFlush = millis(); faultlog_flush(); }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
 }
 
 void initTasks() {
@@ -84,7 +91,9 @@ void initTasks() {
 #if defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
   esp_task_wdt_config_t wdt_cfg = {
     .timeout_ms     = (uint32_t)(TASK_WDT_TIMEOUT_S * 1000),
-    .idle_core_mask = (1U << portNUM_PROCESSORS) - 1U,
+    // Idle tasks stay UNwatched: a flash erase disables the cache on both cores
+    // and starves them, which must not panic the controller.
+    .idle_core_mask = 0,
     .trigger_panic  = true,
   };
   esp_task_wdt_reconfigure(&wdt_cfg);   // core auto-inits WDT; reconfigure is safe

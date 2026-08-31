@@ -6,6 +6,10 @@
 //  Flip feature flags as hardware / libraries come online.
 // ============================================================
 
+// Single source of truth for this tree's version. Bump the MINOR digit on
+// every change; MAJOR only for a redesign. Reported by GET:DIAG as fw=.
+#define FIRMWARE_VERSION  "6.2.0"
+
 // ---- Feature flags (compile-time) --------------------------
 #define HAS_OLED        1   // SSD1306 via I2C
 #define HAS_NEOPIXEL    1   // WS2812B x8
