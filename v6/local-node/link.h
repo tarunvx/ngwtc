@@ -22,6 +22,9 @@
 // ============================================================
 
 #define LINK_TIMEOUT_MS  2000   // no valid frame for 2s => link down (8 frames)
+// A forward seq jump larger than this (500 s of outage at 4 Hz) is not real
+// loss — it means the tank node restarted and its counter went back to 0.
+#define LINK_SEQ_GAP_MAX 2000
 
 void     link_init();           // opens the UART; no WiFi dependency
 void     link_tick();           // periodic: drain UART, parse, liveness events
@@ -40,6 +43,8 @@ uint8_t  link_usLevelPct();     // ultrasonic level 0..100% (mapped on tank node
 uint32_t link_flowTotalPulses();// cumulative pulses since tank-node boot
 uint16_t link_seq();            // last sequence number
 uint32_t link_dropCount();
-uint32_t link_rawBytes();      // detected sequence gaps (diagnostics)
+uint32_t link_rawBytes();
+uint32_t link_tankRestarts();
+uint32_t link_crcErrors();      // detected sequence gaps (diagnostics)
 
 #endif // LINK_H

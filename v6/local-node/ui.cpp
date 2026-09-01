@@ -8,6 +8,7 @@
 #include "mqtt.h"
 #include "menu.h"
 #include "link.h"
+#include "fault_log.h"
 
 #if HAS_OLED
   #include <Wire.h>
@@ -41,6 +42,17 @@ static uint32_t s_shiftAt = 0;
 void ui_requestUpdate() { s_uiDirty = true; }
 
 bool ui_isDim() { return s_dim; }
+
+bool ui_diagMode() { return settings().diagMode; }
+
+void ui_setDiagMode(bool on) {
+  if (settings().diagMode == on) return;
+  settings_setBool("diagMode", on);   // persists, so it survives a crash reboot
+  ui_wake();
+  ui_requestUpdate();
+}
+
+void ui_toggleDiagMode() { ui_setDiagMode(!settings().diagMode); }
 
 void ui_wake() {
   s_lastActivity = millis();
@@ -161,6 +173,7 @@ void ui_tick() {
   // Refresh on events or periodically (2s during pump, 5s idle)
   uint32_t now = millis();
   uint32_t refreshInterval = (sm_isPumpRunningState(sm_state()) || sm_state() == ST_STARTING) ? 2000 : 5000;
+  if (settings().diagMode) refreshInterval = 1000;   // it is a live monitor
   if (!s_uiDirty && (now - s_lastUiUpdate < refreshInterval)) return;
   s_lastUiUpdate = now;
   s_uiDirty = false;
@@ -216,6 +229,42 @@ void ui_tick() {
       uint8_t idx = start + i;
       oled.printf("%c %s\n", idx == sel ? '>' : ' ', menu_itemLabel(idx));
     }
+    oled.display();
+    return;
+  }
+
+  // ---- Diagnostic screen ----
+  // Sits below the menu and popups so it can always be switched off, but above
+  // the operating screen: while diagnosing you want one unchanging layout.
+  if (settings().diagMode) {
+    oled.setTextSize(1);
+    oled.setTextColor(WHITE);
+
+    oled.setCursor(0, 0);
+    oled.printf("DIAG up%lus", (unsigned long)(millis() / 1000));
+    drawLink(108, 0, link_alive());
+    drawWifi(120, 0, WiFi.status() == WL_CONNECTED);
+
+    oled.setCursor(0, 10);
+    oled.printf("LVL%3u%%  US%3u%%", sensors_levelPct(), sensors_ultrasonicLevelPct());
+
+    uint16_t lpm = sensors_flowLpmX10();
+    oled.setCursor(0, 20);
+    oled.printf("D%4umm  FL%u.%u", (unsigned)sensors_distanceMm(), lpm / 10, lpm % 10);
+
+    oled.setCursor(0, 30);
+    oled.printf("SEQ%5u DR%5lu", (unsigned)link_seq(), (unsigned long)link_dropCount());
+
+    oled.setCursor(0, 40);
+    oled.printf("RX%7lu CE%4lu", (unsigned long)link_rawBytes(),
+                (unsigned long)link_crcErrors());
+
+    oled.setCursor(0, 50);
+    oled.printf("HP%3luk TR%lu F%u",
+                (unsigned long)(ESP.getFreeHeap() / 1024),
+                (unsigned long)link_tankRestarts(),
+                (unsigned)faultlog_count());
+
     oled.display();
     return;
   }

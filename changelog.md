@@ -8,7 +8,103 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.3.0** (`esp-32-dev/`) · **v6.8.0** (`v6/local-node/`) · **v6.2.0** (`v6/tank-node/`)
+Current: **v5.3.0** (`esp-32-dev/`) · **v6.10.0** (`v6/local-node/`) · **v6.4.0** (`v6/tank-node/`)
+
+---
+# Version 6.10.0 — v6/local-node
+## Diagnostic screen, carried over from the minimal test sketch
+
+The stripped-down test build used during the reset investigation had a single
+unchanging monitor screen, which proved far easier to watch than the dashboard's
+rotating content. Brought into the real firmware.
+
+### Added
+- **`Diagnostics` menu item** toggles a persistent live monitor: uptime, level,
+  ultrasonic %, distance, flow, link sequence, drops, raw bytes, CRC errors,
+  free heap, tank restarts and fault count. Refreshes at 1 s instead of the
+  usual 2 s/5 s.
+- It sits **below** popups and the menu (so it can always be switched off) but
+  **above** the operating screen — while diagnosing you want one stable layout,
+  not one that changes when the pump starts.
+- `link_crcErrors()` — counts full frames that arrived but failed CRC. Paired
+  with `link_rawBytes()` this distinguishes "bytes never arrive" (wiring) from
+  "bytes arrive, bits flip" (noise), which was the key insight when diagnosing
+  the 15 m link.
+
+### Changed
+- The dormant `mcuUpsPresent` settings slot was **renamed in place** to
+  `diagMode` — same type and offset, so `sizeof(Settings)` and the stored NVS
+  blob are unchanged and existing settings survive. (Adding a field would have
+  reset NVS.) Also settable remotely via `SET:diagMode:1`.
+
+---
+# Version 6.9.0 — v6/local-node
+## Fix the drop counter lying when the tank node restarts
+
+Field data showed `"ls":2158,"ld":65816` — more drops than frames ever sent.
+The tank node restarting resets its `seq` to 0, and `(uint16_t)(0 - expected)`
+evaluates to ~65000, which went straight into the drop total in one hit. Every
+loss percentage computed across a tank-node restart was therefore worthless.
+
+### Fixed
+- A forward sequence gap larger than `LINK_SEQ_GAP_MAX` (2000, i.e. 500 s of
+  outage at 4 Hz) is now counted as a **tank-node restart**, not as lost frames.
+  A natural uint16 wrap produces a gap of 0 and is unaffected.
+
+### Added
+- `link_tankRestarts()`, published in the status JSON as `tr`. Tank-node reboots
+  were previously invisible except as a corrupted drop count — now they are a
+  first-class signal, which matters given the ESP8266 boot-reliability issue.
+
+---
+# Version tank 6.4.0 — v6/tank-node
+## Guard the ultrasonic calibration against the blind zone
+
+`US_DIST_FULL_CM` had been set to 15 cm from a tape measure, but `US_MIN_VALID_CM`
+is 20 cm (the JSN-SR04T's blind zone) and `usPingMm()` rejects anything nearer.
+`usUpdate()` keeps the last good median on a miss, so filling past a 20 cm air gap
+would freeze the reading at ~93% rather than reaching 100% — and
+`LINK_FLAG_DIST_OK` would stay set, hiding the staleness.
+
+Display-only: the floats remain authoritative for all control and safety logic,
+so pump behaviour was never at risk.
+
+### Changed
+- `US_DIST_FULL_CM` 15 → **20 cm**, clamped to the blind zone. The top ~5 cm of
+  the tank now reads as 100%. To recover that range, raise the transducer so the
+  air gap at full exceeds 20 cm.
+
+### Added
+- `#error` guards for `US_DIST_FULL_CM < US_MIN_VALID_CM` and
+  `US_DIST_LOW_CM <= US_DIST_FULL_CM`, so a bad calibration fails the build
+  instead of silently freezing the reading.
+
+---
+# Version tank 6.3.0 — v6/tank-node
+## Keep the ultrasonic ping off the wire while a frame is transmitting
+
+The ping and the transmit were adjacent: `usUpdate()` ran immediately before
+`Serial.write()`. The transducer burst pulls current through the 12–15 m ground
+wire that is *also* the link's signal reference, so every frame was being clocked
+out while the reference was still settling — a plausible contributor to the ~1%
+byte error rate.
+
+Worse, `write()` only fills the UART FIFO and returns; at 2400 baud the frame is
+still on the wire for ~108 ms afterwards. Lowering the baud had therefore
+*widened* the window in which a ping could collide with a transmission.
+
+### Changed
+- `Serial.flush()` after `write()`, so the frame is fully clocked out before
+  anything else draws current.
+- `usUpdate()` moved to **after** the flush and the heartbeat blink. The ping now
+  lands in the idle part of the 250 ms period, ~140 ms before the next frame.
+  Its reading is carried by the following frame — harmless, it is display-only
+  and the tank level moves slowly.
+
+> **Wiring note:** a Schottky in the tank node's **VCC** line is fine (reverse
+> protection). A diode in the **GND** line must not be added — it would lift the
+> tank node's ground above the local node's by a *load-dependent* amount, which
+> is exactly the error mechanism being removed.
 
 ---
 # Version 6.8.0 — v6/local-node

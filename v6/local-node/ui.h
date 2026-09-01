@@ -9,4 +9,7 @@ void ui_toggleOpScreen();  // toggle between operating screen and home
 bool ui_isOpScreen();      // true when operating screen is shown
 void ui_wake();            // full brightness + restart the idle-dim timer
 bool ui_isDim();           // true while the panel is dimmed
+bool ui_diagMode();        // continuous diagnostic screen (NVS-backed)
+void ui_setDiagMode(bool on);
+void ui_toggleDiagMode();
 #endif

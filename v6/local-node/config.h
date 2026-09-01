@@ -8,21 +8,21 @@
 
 // Single source of truth for this tree's version. Bump the MINOR digit on
 // every change; MAJOR only for a redesign. Reported by GET:DIAG as fw=.
-#define FIRMWARE_VERSION  "6.8.0"
+#define FIRMWARE_VERSION  "6.10.0"
 
 // ---- Feature flags (compile-time) --------------------------
 #define HAS_OLED        1   // SSD1306 via I2C
 #define HAS_NEOPIXEL    1   // WS2812B x8
-#define HAS_DHT22       1   // ambient sensor
+#define HAS_DHT22       0   // ambient sensor
 #define HAS_MQTT        1   // Adafruit MQTT + WiFi
 #define HAS_FLOW_ISR    1   // YF-S201
 #define HAS_CT_CLAMP    1   // SCT-013 via ADC
-#define OTA_ENABLED     1   // ArduinoOTA network update (needs an OTA partition scheme)
+#define OTA_ENABLED     0   // ArduinoOTA network update (needs an OTA partition scheme)
 
 // ---- Runtime feature toggles (overridable via NVS settings) ----
 #define DEFAULT_HW_TIMER_PRESENT   false   // 555/ATtiny upper-bound timer
 #define DEFAULT_ADAPTIVE_DRYRUN    false   // experimental
-#define DEFAULT_MCU_UPS_PRESENT    false
+#define DEFAULT_DIAG_MODE          false   // continuous diagnostic screen
 
 // ---- Phase-1 / bring-up flag --------------------------------
 //  When 1: AUTO logic disabled, actuator pulses suppressed, only MANUAL

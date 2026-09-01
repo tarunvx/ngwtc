@@ -100,19 +100,29 @@
 #include "link_proto.h"
 
 // ---- USER CONFIG -------------------------------------------
-#define FIRMWARE_VERSION    "6.2.0"  // bump MINOR on every change to this node
+#define FIRMWARE_VERSION    "6.4.0"  // bump MINOR on every change to this node
 #define TANK_DEBUG          0       // 1 = text debug on UART1 (GPIO2), disables LED
 #define TELEMETRY_PERIOD_MS 250     // ~4 Hz telemetry
 #define NOFLOW_PPS_FLOOR    1       // pulses/sec below this => not "active"
 
 // Ultrasonic level mapping — sensor on top, so distance shrinks as it fills.
+// US_DIST_FULL_CM must stay >= US_MIN_VALID_CM: closer echoes are inside the
+// transducer's blind zone and are rejected, which would freeze the reading
+// short of 100% instead of saturating at it.
 #define US_DIST_FULL_CM     20      // air gap at 100% full (>= sensor dead zone)
-#define US_DIST_LOW_CM     100      // air gap at 0% (empty)
+#define US_DIST_LOW_CM      88      // air gap at 0% (empty)
 #define US_MIN_VALID_CM     20      // JSN-SR04T dead zone — reject nearer echoes
 #define US_MAX_VALID_CM    600      // sensor max range
 #define US_ECHO_TIMEOUT_US  25000UL // pulseIn timeout (~4.3 m round trip)
 #define US_SAMPLES          5       // rolling median window (ODD)
 #define US_TEMP_C           25.0f   // ambient temp for speed-of-sound accuracy
+
+#if US_DIST_FULL_CM < US_MIN_VALID_CM
+  #error "US_DIST_FULL_CM is inside the sensor blind zone: 100% can never be read"
+#endif
+#if US_DIST_LOW_CM <= US_DIST_FULL_CM
+  #error "US_DIST_LOW_CM must be greater than US_DIST_FULL_CM"
+#endif
 
 // ---- Pin map -----------------------------------------------
 #define PIN_FLOAT_25   5    // D1
@@ -267,8 +277,6 @@ void loop() {
   // the local node owns the LPM math + smoothing identical to v5).
   uint32_t pps = (windowMs > 0) ? (pulses * 1000UL / windowMs) : 0;
 
-  usUpdate();   // one ping per frame, folded into the rolling median
-
   LinkTelemetry t;
   t.netId        = LINK_NET_ID;
   t.version      = LINK_PROTO_VERSION;
@@ -288,6 +296,9 @@ void loop() {
   link_fillCrc(&t);
 
   Serial.write((const uint8_t*)&t, sizeof(t));
+  // write() only fills the FIFO; at 2400 baud the frame is still on the wire for
+  // ~108 ms after it returns. Wait for it before drawing any burst current.
+  Serial.flush();
 
 #if !TANK_DEBUG
   // Heartbeat: brief LED blink each frame sent.
@@ -295,6 +306,12 @@ void loop() {
   delay(2);
   digitalWrite(LED_BUILTIN, HIGH);
 #endif
+
+  // Ping only once the frame is fully clocked out. The transducer burst pulls
+  // current through the 15 m ground wire that is also the link's signal
+  // reference, so it must not overlap a transmission. The reading is carried by
+  // the next frame (250 ms later) — harmless, the value is display-only.
+  usUpdate();
 
   // Occasional diagnostics (every ~2 s) without flooding.
   static uint8_t dbg = 0;

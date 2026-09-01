@@ -210,7 +210,7 @@ void mqtt_publishStatus() {
     "\"lvl\":%u,\"fl\":%u,\"i\":%u,\"io\":%u,\"f\":%u,"
     "\"t\":%d,\"rh\":%u,\"d\":%u,\"us\":%u,"
     "\"bi\":%u,\"bf\":%u,\"ov\":%u,"
-    "\"lk\":%u,\"la\":%lu,\"ls\":%u,\"ld\":%lu}",
+    "\"lk\":%u,\"la\":%lu,\"ls\":%u,\"ld\":%lu,\"tr\":%lu}",
     modeName(settings().mode), sm_stateName(sm_state()),
     settings().sleepMode ? 1u : 0u,
     sensors_levelPct(), sensors_flowLpmX10(),
@@ -222,7 +222,8 @@ void mqtt_publishStatus() {
     sm_overflowIgnore() ? 1u : 0u,
     link_alive() ? 1u : 0u,
     (unsigned long)(link_everReceived() ? link_ageMs() : 0),
-    (unsigned)link_seq(), (unsigned long)link_dropCount());
+    (unsigned)link_seq(), (unsigned long)link_dropCount(),
+    (unsigned long)link_tankRestarts());
   size_t jlen = strlen(json);
   Serial.printf("%s STATUS (%u B) %s\n", LOG_TAG_MQ, (unsigned)jlen, json);
 #if HAS_MQTT

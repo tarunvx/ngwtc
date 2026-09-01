@@ -28,6 +28,8 @@ static volatile uint8_t  s_flags       = 0;
 static volatile uint32_t s_lastRxMs    = 0;
 static volatile bool     s_everRx      = false;
 static volatile uint32_t s_dropCount   = 0;
+static volatile uint32_t s_crcErrors   = 0;   // full frames received but corrupt
+static volatile uint32_t s_tankRestarts = 0;
 static volatile uint32_t s_rawBytes    = 0;   // every byte seen, valid frame or not
 static volatile uint16_t s_prevSeq     = 0;
 static volatile bool     s_havePrevSeq = false;
@@ -48,7 +50,11 @@ static void acceptFrame(const LinkTelemetry* t) {
     uint16_t expected = (uint16_t)(s_prevSeq + 1);
     if (t->seq != expected) {
       uint16_t gap = (uint16_t)(t->seq - expected);
-      s_dropCount += gap;
+      // The tank node restarting resets seq to 0, which unsigned arithmetic
+      // turns into a ~65000 "gap". Count that as a restart, not lost frames.
+      // A natural uint16 wrap yields gap 0, so it is unaffected.
+      if (gap > LINK_SEQ_GAP_MAX) s_tankRestarts++;
+      else                        s_dropCount += gap;
     }
   }
   s_prevSeq     = t->seq;
@@ -88,6 +94,7 @@ static void parseByte(uint8_t b) {
         LinkTelemetry t;
         memcpy(&t, s_buf, sizeof(t));
         if (link_checkFrame(&t, sizeof(t))) acceptFrame(&t);
+        else                                s_crcErrors++;
         s_sync = 0;
       }
       break;
@@ -215,3 +222,9 @@ uint32_t link_dropCount() {
 // Climbs even with no tank node attached if the RX line is floating and picking
 // up noise — a spurious-UART-traffic detector.
 uint32_t link_rawBytes() { return s_rawBytes; }
+
+uint32_t link_tankRestarts() { return s_tankRestarts; }
+
+// High crc errors with rx tracking the frame count means bytes arrive but bits
+// flip — a noise problem, not a wiring or sender problem.
+uint32_t link_crcErrors() { return s_crcErrors; }

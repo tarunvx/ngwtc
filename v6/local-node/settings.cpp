@@ -29,7 +29,7 @@ static void loadDefaults() {
   s_cfg.sleepMode       = false;
   s_cfg.hwTimerPresent  = DEFAULT_HW_TIMER_PRESENT;
   s_cfg.adaptiveDryRun  = DEFAULT_ADAPTIVE_DRYRUN;
-  s_cfg.mcuUpsPresent   = DEFAULT_MCU_UPS_PRESENT;
+  s_cfg.diagMode        = DEFAULT_DIAG_MODE;
   s_cfg.levelSource     = DEFAULT_LEVEL_SOURCE;
   s_cfg.ledAltMs        = DEF_LED_ALT_MS;
   s_cfg.uiDimMs         = DEF_UI_DIM_MS;
@@ -128,7 +128,7 @@ bool settings_setBool(const char* k, bool v) {
        _matchBool(k, "sleepMode",      s_cfg.sleepMode,      v)
     || _matchBool(k, "hwTimerPresent", s_cfg.hwTimerPresent, v)
     || _matchBool(k, "adaptiveDryRun", s_cfg.adaptiveDryRun, v)
-    || _matchBool(k, "mcuUpsPresent",  s_cfg.mcuUpsPresent,  v)
+    || _matchBool(k, "diagMode",       s_cfg.diagMode,       v)
     || _matchBool(k, "bypassCurrentSense", s_cfg.bypassCurrentSense, v)
     || _matchBool(k, "bypassFlowSense",    s_cfg.bypassFlowSense,    v)
     || _matchBool(k, "bypassFeedback",     s_cfg.bypassFeedback,     v)

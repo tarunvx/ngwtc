@@ -33,7 +33,9 @@ struct Settings {
   bool     sleepMode;       // explicit sleep flag (separate from mode for safety)
   bool     hwTimerPresent;
   bool     adaptiveDryRun;
-  bool     mcuUpsPresent;
+  // Renamed in place from the dormant mcuUpsPresent slot — same type/offset, so
+  // sizeof(Settings) and the stored NVS blob stay compatible.
+  bool     diagMode;        // continuous diagnostic screen instead of the dashboard
   uint8_t  levelSource;     // LevelSource
 
   // v6: the pressure sensor was replaced by the ultrasonic, so this slot was

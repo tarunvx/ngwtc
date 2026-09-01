@@ -23,6 +23,7 @@ enum MenuItem : uint8_t {
   MI_SMART_SENSE,
   MI_OVERFLOW_ONCE,
   MI_LED_SOURCE,
+  MI_DIAG_MODE,
   MI_BYPASS_CURRENT,
   MI_BYPASS_FLOW,
   MI_BYPASS_FEEDBACK,
@@ -55,6 +56,7 @@ static const char* kLabels[MI_COUNT] = {
   "Smart-Sense",
   "Ignore Full 1x",
   "LED: Flt/US",
+  "Diagnostics",
   "Bypass I-Sense",
   "Bypass Flow",
   "Bypass Feedback",
@@ -185,6 +187,13 @@ static void activate() {
       bool wasUs = (settings().levelSource == LVL_ULTRASONIC);
       settings_setU8("levelSource", wasUs ? LVL_FLOAT : LVL_ULTRASONIC);
       ui_showPopup(wasUs ? "LED: Floats" : "LED: Ultrasonic");
+      break;
+    }
+    case MI_DIAG_MODE: {
+      bool on = !settings().diagMode;
+      ui_setDiagMode(on);
+      ui_showPopup(on ? "Diag: ON" : "Diag: OFF");
+      if (on) s_open = false;   // drop straight to the monitor
       break;
     }
     case MI_BYPASS_CURRENT: {
