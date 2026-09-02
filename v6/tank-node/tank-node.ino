@@ -100,7 +100,7 @@
 #include "link_proto.h"
 
 // ---- USER CONFIG -------------------------------------------
-#define FIRMWARE_VERSION    "6.4.0"  // bump MINOR on every change to this node
+#define FIRMWARE_VERSION    "6.5.0"  // bump MINOR on every change to this node
 #define TANK_DEBUG          0       // 1 = text debug on UART1 (GPIO2), disables LED
 #define TELEMETRY_PERIOD_MS 250     // ~4 Hz telemetry
 #define NOFLOW_PPS_FLOOR    1       // pulses/sec below this => not "active"
@@ -130,8 +130,16 @@
 #define PIN_FLOAT_75   14   // D5
 #define PIN_FLOAT_100  12   // D6
 #define PIN_FLOW       13   // D7
-#define PIN_US_TRIG    15   // D8 — idle LOW, which is what the boot strap needs
+#define PIN_US_TRIG    3    // RX/D9 — NOT a boot strap. See note below.
 #define PIN_US_ECHO    16   // D0 — via 1k/2k divider; pulseIn polls, no IRQ
+
+// TRIG used to live on GPIO15 (D8), which is a boot-mode strap and must read LOW
+// at reset. The JSN-SR04T pulls its TRIG input up, measured >2.5 V while reset
+// was held, so the ESP8266 sampled GPIO15 HIGH and entered SDIO boot mode — it
+// hung silently instead of running the sketch. Symptom: a brief reset worked
+// (the pin had not drifted up yet) but a held reset or a cold power-on did not.
+// GPIO3 is UART0 RX and has no boot role; the link is one-way, so UART0 is
+// opened TX-only in setup() and the pin is free.
 
 #if TANK_DEBUG
   #define DBG(...) Serial1.printf(__VA_ARGS__)
@@ -226,7 +234,8 @@ void setup() {
   WiFi.forceSleepBegin();
   delay(10);
 
-  Serial.begin(LINK_SERIAL_BAUD);   // UART0 carries telemetry, not text
+  // TX-only frees GPIO3 (RX) for use as the ultrasonic TRIG.
+  Serial.begin(LINK_SERIAL_BAUD, SERIAL_8N1, SERIAL_TX_ONLY);
 
 #if TANK_DEBUG
   Serial1.begin(115200);            // GPIO2 (D4), TX-only
@@ -242,7 +251,7 @@ void setup() {
   pinMode(PIN_FLOW,      INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_FLOW), flowIsr, FALLING);
 
-  // ECHO arrives through a 1k/2k divider; TRIG idles LOW so GPIO15 boots clean.
+  // ECHO arrives through a 1k/2k divider. TRIG is on GPIO3, off the boot straps.
   pinMode(PIN_US_TRIG, OUTPUT);
   digitalWrite(PIN_US_TRIG, LOW);
   pinMode(PIN_US_ECHO, INPUT);

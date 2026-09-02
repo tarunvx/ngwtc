@@ -45,6 +45,7 @@ uint16_t link_seq();            // last sequence number
 uint32_t link_dropCount();
 uint32_t link_rawBytes();
 uint32_t link_tankRestarts();
-uint32_t link_crcErrors();      // detected sequence gaps (diagnostics)
+uint32_t link_crcErrors();
+uint32_t link_tankUptimeMs();      // detected sequence gaps (diagnostics)
 
 #endif // LINK_H

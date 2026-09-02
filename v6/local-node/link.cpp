@@ -23,6 +23,7 @@ static volatile uint8_t  s_floatBits   = 0;
 static volatile uint16_t s_distanceMm  = 0;
 static volatile uint8_t  s_usLevelPct  = 0;
 static volatile uint32_t s_flowTotal   = 0;
+static volatile uint32_t s_tankUpMs    = 0;   // tank node's own uptime
 static volatile uint16_t s_seq         = 0;
 static volatile uint8_t  s_flags       = 0;
 static volatile uint32_t s_lastRxMs    = 0;
@@ -64,6 +65,7 @@ static void acceptFrame(const LinkTelemetry* t) {
   s_distanceMm  = t->distanceMm;
   s_usLevelPct  = t->usLevelPct;
   s_flowTotal   = t->flowTotal;
+  s_tankUpMs    = t->uptimeMs;
   s_seq         = t->seq;
   s_flags       = t->flags;
   s_lastRxMs    = millis();
@@ -228,3 +230,7 @@ uint32_t link_tankRestarts() { return s_tankRestarts; }
 // High crc errors with rx tracking the frame count means bytes arrive but bits
 // flip — a noise problem, not a wiring or sender problem.
 uint32_t link_crcErrors() { return s_crcErrors; }
+
+// Resets when the tank node reboots, so it separates "lost power / restarted"
+// from "still up but stopped talking".
+uint32_t link_tankUptimeMs() { return s_tankUpMs; }

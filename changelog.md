@@ -8,7 +8,52 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.3.0** (`esp-32-dev/`) · **v6.10.0** (`v6/local-node/`) · **v6.4.0** (`v6/tank-node/`)
+Current: **v5.3.0** (`esp-32-dev/`) · **v6.12.0** (`v6/local-node/`) · **v6.5.0** (`v6/tank-node/`)
+
+---
+# Version tank 6.5.0 — v6/tank-node
+## ROOT CAUSE: ultrasonic TRIG was sitting on a boot strapping pin
+
+The tank node's long-running "needs many resets to start" fault. TRIG was on
+**GPIO15 (D8)**, which the ESP8266 samples at reset to choose its boot mode and
+which **must read LOW**. The JSN-SR04T pulls its TRIG input up; measured **>2.5 V
+on D8 while reset was held**, against a 0.825 V threshold. GPIO15 HIGH selects
+**SDIO boot**, so the chip looked for a non-existent SD card and hung silently
+without ever running the sketch.
+
+The diagnostic clue was the reset timing, which ruled out every power theory:
+
+| Action | Result | Why |
+|---|---|---|
+| Brief reset tap (<1 s) | **boots** | firmware had driven TRIG LOW; pin had not drifted up yet |
+| Held reset (~1 s) | fails | sensor pull-up wins, GPIO15 reads HIGH |
+| Cold power-on | fails | firmware never drove it LOW, HIGH from the start |
+
+A *longer* reset failing is impossible for a supply-ramp or POR problem, where
+more settling time can only help. The capacitors were a red herring — the
+correlation was with rewiring done at the same time.
+
+### Changed
+- `PIN_US_TRIG` **GPIO15 (D8) → GPIO3 (RX/D9)**, which has no boot role.
+- `Serial.begin(..., SERIAL_TX_ONLY)` frees GPIO3. The link is one-way, so UART0
+  never needed a receive pin.
+
+> **Requires one wire move at the tank node:** TRIG from D8 to D9/RX.
+> A 1 kΩ pulldown on D8 is a valid stopgap, but it only balances a divider
+> against the sensor's pull-up; moving the pin removes the failure mode.
+
+---
+# Version 6.11.0 — v6/local-node
+## Publish CRC errors in the status feed
+
+`link_crcErrors()` was only visible on the diagnostic screen, so remote
+monitoring could not tell a **bulk outage** (frames never sent/received, which
+dumps a large jump into `ld`) apart from **steady corruption** (frames arriving
+intact-length but failing CRC). Those have completely different causes.
+
+### Added
+- `ce` in the status JSON, next to `ld`. With `ls` it gives the same
+  outage-vs-noise discrimination remotely that the OLED already had.
 
 ---
 # Version 6.10.0 — v6/local-node
@@ -192,8 +237,10 @@ unplugging it. OTA turns that into a one-command upload over WiFi.
 ### Changed
 - `OTA_ENABLED` 0 → 1.
 
-> **Requires one last USB flash** with an OTA-capable partition scheme — the
-> default single-app layout has nowhere to stage the new image.
+> **Partition scheme:** the Arduino `default` scheme also has two app slots, so
+> OTA is possible there — but at 1.25 MB per slot the build sits at ~85%.
+> `min_spiffs` (1.9 MB slots) is preferred purely for headroom. Layout cannot be
+> changed over OTA, so choose it during a USB flash.
 
 ---
 # Version 6.4.0 / 5.3.0 — both trees

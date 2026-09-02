@@ -153,12 +153,13 @@ bool mqtt_dispatchCmd(const char* line) {
     if (strcmp(act, "STATUS") == 0) { mqtt_publishStatus(); mqtt_publishAck(id, true, "OK"); return true; }
     if (strcmp(act, "DIAG") == 0) {
       char tmp[140];
-      snprintf(tmp, sizeof(tmp), "fw=%s rst=%s heap=%lu min=%lu up=%lus sup=%lu bc=%s rx=%lu",
+      snprintf(tmp, sizeof(tmp), "fw=%s rst=%s heap=%lu min=%lu up=%lus sup=%lu bc=%s rx=%lu tu=%lus",
         FIRMWARE_VERSION,
         faultlog_resetReasonName(), (unsigned long)ESP.getFreeHeap(),
         (unsigned long)ESP.getMinFreeHeap(), (unsigned long)(millis() / 1000),
         (unsigned long)faultlog_suppressed(), bc_report(),
-        (unsigned long)link_rawBytes());
+        (unsigned long)link_rawBytes(),
+        (unsigned long)(link_tankUptimeMs() / 1000));
       mqtt_publishAck(id, true, tmp);
       return true;
     }
@@ -210,7 +211,7 @@ void mqtt_publishStatus() {
     "\"lvl\":%u,\"fl\":%u,\"i\":%u,\"io\":%u,\"f\":%u,"
     "\"t\":%d,\"rh\":%u,\"d\":%u,\"us\":%u,"
     "\"bi\":%u,\"bf\":%u,\"ov\":%u,"
-    "\"lk\":%u,\"la\":%lu,\"ls\":%u,\"ld\":%lu,\"tr\":%lu}",
+    "\"lk\":%u,\"la\":%lu,\"ls\":%u,\"ld\":%lu,\"ce\":%lu,\"tr\":%lu}",
     modeName(settings().mode), sm_stateName(sm_state()),
     settings().sleepMode ? 1u : 0u,
     sensors_levelPct(), sensors_flowLpmX10(),
@@ -223,6 +224,7 @@ void mqtt_publishStatus() {
     link_alive() ? 1u : 0u,
     (unsigned long)(link_everReceived() ? link_ageMs() : 0),
     (unsigned)link_seq(), (unsigned long)link_dropCount(),
+    (unsigned long)link_crcErrors(),
     (unsigned long)link_tankRestarts());
   size_t jlen = strlen(json);
   Serial.printf("%s STATUS (%u B) %s\n", LOG_TAG_MQ, (unsigned)jlen, json);
