@@ -169,11 +169,17 @@ void sensors_tick() {
 
   // Only flag implausible level while the link is alive — a dead link would
   // otherwise spam stale/zero float patterns. Link-loss is handled separately.
-  if (link_alive() && !s_levelPlausible) {
+  // Edge-triggered: the condition persists for as long as the wiring is wrong,
+  // and re-raising it every tick floods the event queue and fills the 32-slot
+  // fault ring with a single code, hiding everything else.
+  static bool s_implausibleLatched = false;
+  bool implausible = link_alive() && !s_levelPlausible;
+  if (implausible && !s_implausibleLatched) {
     Event e{}; e.type = EV_FAULT;
     e.p.fault = { FC_IMPLAUSIBLE_LEVEL, SEV_WARN };
     sendEvent(e);
   }
+  s_implausibleLatched = implausible;
 
   // ---- feedback ----
   bool fbOn  = (digitalRead(PIN_FB_ON)  == LOW);

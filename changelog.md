@@ -8,7 +8,25 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.3.0** (`esp-32-dev/`) · **v6.12.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
+Current: **v5.4.0** (`esp-32-dev/`) · **v6.13.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
+
+---
+# Version 6.13.0 / 5.4.0 — both trees
+## Implausible-level fault was re-raised every tick
+
+Bench testing with a single float switch held produced `sup=33945` in 2010 s —
+about 17 suppressed duplicates per second. `sensors_tick()` runs every 50 ms and
+re-raised `FC_IMPLAUSIBLE_LEVEL` on every pass for as long as the condition held,
+instead of once when it became true.
+
+The 60 s dedup kept the log from filling instantly, but over 33 minutes the
+32-slot ring still ended up holding **nothing but this one fault** — so a genuine
+fault in that window would have been invisible. It also pushed ~17 events/second
+through the queue for no benefit.
+
+### Fixed
+- Edge-triggered: raised once on the transition into an implausible state, not
+  continuously while it persists. Both trees.
 
 ---
 # Version tank 6.8.0 — v6/tank-node
