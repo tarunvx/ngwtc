@@ -100,7 +100,7 @@
 #include "link_proto.h"
 
 // ---- USER CONFIG -------------------------------------------
-#define FIRMWARE_VERSION    "6.5.0"  // bump MINOR on every change to this node
+#define FIRMWARE_VERSION    "6.8.0"  // bump MINOR on every change to this node
 #define TANK_DEBUG          0       // 1 = text debug on UART1 (GPIO2), disables LED
 #define TELEMETRY_PERIOD_MS 250     // ~4 Hz telemetry
 #define NOFLOW_PPS_FLOOR    1       // pulses/sec below this => not "active"
@@ -130,16 +130,24 @@
 #define PIN_FLOAT_75   14   // D5
 #define PIN_FLOAT_100  12   // D6
 #define PIN_FLOW       13   // D7
-#define PIN_US_TRIG    3    // RX/D9 — NOT a boot strap. See note below.
+#define PIN_US_TRIG    15   // D8 — REQUIRES an external 1k pulldown to GND
 #define PIN_US_ECHO    16   // D0 — via 1k/2k divider; pulseIn polls, no IRQ
 
-// TRIG used to live on GPIO15 (D8), which is a boot-mode strap and must read LOW
-// at reset. The JSN-SR04T pulls its TRIG input up, measured >2.5 V while reset
-// was held, so the ESP8266 sampled GPIO15 HIGH and entered SDIO boot mode — it
-// hung silently instead of running the sketch. Symptom: a brief reset worked
-// (the pin had not drifted up yet) but a held reset or a cold power-on did not.
-// GPIO3 is UART0 RX and has no boot role; the link is one-way, so UART0 is
-// opened TX-only in setup() and the pin is free.
+// Pin history — three candidates, only one works on a NodeMCU-style board:
+//
+//  GPIO3 (RX): no boot role, but the onboard USB-serial chip's TX is wired to
+//    it and drives against the ESP. Ultrasonic dead.
+//  GPIO0 (D3): strap wants HIGH, which the sensor's pull-up supplies — but the
+//    DTR auto-reset transistor also sits on it and holds it LOW whenever a
+//    terminal has the port open. Ultrasonic dead.
+//  GPIO15 (D8): nothing else attached, so it drives the sensor correctly. Its
+//    only issue is the boot strap, which must read LOW at reset while the
+//    JSN-SR04T pulls TRIG up (measured >2.5 V with reset held -> SDIO boot ->
+//    hang). An external 1k pulldown fixes that outright:
+//        at reset:  1k/(1k+10k) x 5 V = 0.45 V   (threshold is 0.825 V)
+//        driving:   3.3 V / 1k = 3.3 mA          (well within GPIO limits)
+//
+// Lesson: "free in the datasheet" and "free on this board" are different claims.
 
 #if TANK_DEBUG
   #define DBG(...) Serial1.printf(__VA_ARGS__)
@@ -234,7 +242,7 @@ void setup() {
   WiFi.forceSleepBegin();
   delay(10);
 
-  // TX-only frees GPIO3 (RX) for use as the ultrasonic TRIG.
+  // TX-only anyway: the link is one-way and nothing is wired to RX.
   Serial.begin(LINK_SERIAL_BAUD, SERIAL_8N1, SERIAL_TX_ONLY);
 
 #if TANK_DEBUG
@@ -251,7 +259,8 @@ void setup() {
   pinMode(PIN_FLOW,      INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_FLOW), flowIsr, FALLING);
 
-  // ECHO arrives through a 1k/2k divider. TRIG is on GPIO3, off the boot straps.
+  // ECHO arrives through a 1k/2k divider. TRIG needs the external 1k pulldown on
+  // D8 (see the pin map note) or the board will not boot.
   pinMode(PIN_US_TRIG, OUTPUT);
   digitalWrite(PIN_US_TRIG, LOW);
   pinMode(PIN_US_ECHO, INPUT);
@@ -310,9 +319,9 @@ void loop() {
   Serial.flush();
 
 #if !TANK_DEBUG
-  // Heartbeat: brief LED blink each frame sent.
+  // Heartbeat: 10 ms is dim but visible; 2 ms out of 250 ms was near-invisible.
   digitalWrite(LED_BUILTIN, LOW);
-  delay(2);
+  delay(10);
   digitalWrite(LED_BUILTIN, HIGH);
 #endif
 

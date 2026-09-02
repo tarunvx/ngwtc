@@ -8,7 +8,70 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.3.0** (`esp-32-dev/`) · **v6.12.0** (`v6/local-node/`) · **v6.5.0** (`v6/tank-node/`)
+Current: **v5.3.0** (`esp-32-dev/`) · **v6.12.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
+
+---
+# Version tank 6.8.0 — v6/tank-node
+## TRIG settles on D8 + 1k pulldown; two "free" pins were not free
+
+| Pin | Boot role | What else is on it | Result |
+|---|---|---|---|
+| GPIO3 (RX) | none | USB-serial chip's TX | drives against the ESP — sensor dead |
+| GPIO0 (D3) | strap HIGH (satisfied) | DTR auto-reset transistor | held LOW with a port open — sensor dead |
+| **GPIO15 (D8)** | strap LOW (violated) | **nothing** | **works, with a 1k pulldown** |
+
+Both alternatives were electrically sound per the ESP8266 datasheet and both
+failed because the *dev board* wires peripherals to them. D8 is the only pin
+with nothing else attached, and its boot-strap conflict is fixed outright by one
+resistor.
+
+### Changed
+- `PIN_US_TRIG` back to **GPIO15 (D8)**; **1k pulldown to GND is now a hardware
+  requirement**.
+- Heartbeat LED blink 2 ms → **10 ms**. At 2 ms out of 250 ms (0.8% duty) it was
+  effectively invisible, which made "is the node alive?" unanswerable by eye.
+
+---
+# Version tank 6.7.0 — v6/tank-node
+## TRIG to GPIO0, where the sensor's pull-up is an asset
+
+Third and final pin for this signal. The measurement that diagnosed the original
+fault — >2.5 V on D8 with reset held — also proves the JSN-SR04T pulls TRIG
+*up*. GPIO0's strap must read **HIGH** at reset, so the sensor now satisfies the
+requirement instead of violating it, and no pulldown resistor is needed.
+
+| Pin | Strap needs | Sensor provides | Result |
+|---|---|---|---|
+| GPIO15 (D8) | LOW | pull-up | SDIO boot, hangs |
+| GPIO3 (RX) | — | — | USB-serial chip drives the pin |
+| **GPIO0 (D3)** | **HIGH** | **pull-up** | **works, no extra parts** |
+
+GPIO0 also carries the FLASH button and the DTR auto-reset circuit. Neither
+matters in this build: the module is pulled off the PCB to flash, and runs
+sealed in a box.
+
+### Changed
+- `PIN_US_TRIG` → **GPIO0 (D3)**. D8/GPIO15 is now unconnected and the board's
+  own pulldown keeps it LOW for boot.
+
+> **One wire move at the tank node: TRIG from D8 to D3.** No resistor required.
+
+---
+# Version tank 6.6.0 — v6/tank-node
+## TRIG back on D8 with a pulldown; GPIO3 is unusable on a dev board
+
+6.5.0 moved TRIG to GPIO3 (RX) to dodge the GPIO15 boot strap. That works on a
+bare ESP-12E but **not on a NodeMCU-style board**: the onboard USB-serial chip's
+TX is hard-wired to GPIO3 and drives against the ESP's output. `SERIAL_TX_ONLY`
+releases the pin on the ESP side only — the external chip keeps driving it. The
+ultrasonic went dead.
+
+### Changed
+- `PIN_US_TRIG` back to **GPIO15 (D8)**, with an external **1k pulldown to GND**
+  as a hardware requirement. It beats the sensor's pull-up
+  (1/(1+10) x 5 V = 0.45 V vs a 0.825 V threshold) so the strap reads LOW at
+  reset, while the ESP still drives TRIG high at ~3.3 mA.
+- `SERIAL_TX_ONLY` kept: the link is one-way, so nothing is lost.
 
 ---
 # Version tank 6.5.0 — v6/tank-node
