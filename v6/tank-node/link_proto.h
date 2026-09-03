@@ -40,8 +40,10 @@
 #define LINK_NET_ID         0x57   // 'W' — private network tag, filters foreign packets
 #define LINK_MSG_TELEMETRY  1      // msgType: tank → local sensor frame
 
-// Wire speed — both nodes must agree. 9600 carries the ~26 B @ 4 Hz telemetry
-// with ~10x headroom and was bench-proven error-free over the installed run.
+// Wire speed — both nodes must agree, and a mismatch simply stops all traffic.
+// Lowered 9600 -> 2400 to widen each bit period 4x (104 us -> 417 us), buying
+// noise margin on the 15 m unshielded run. 26 B @ 4 Hz needs only ~1040 baud,
+// so there is still ~2.3x headroom. See docs/reliable-uart-over-15-metres.md.
 #define LINK_SERIAL_BAUD    2400
 
 // ---- Float bit map (bit set = float submerged / contact CLOSED) ----

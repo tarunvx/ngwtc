@@ -13,7 +13,7 @@
 // ---- Feature flags (compile-time) --------------------------
 #define HAS_OLED        1   // SSD1306 via I2C
 #define HAS_NEOPIXEL    1   // WS2812B x8
-#define HAS_DHT22       0   // ambient sensor
+#define HAS_DHT22       1   // ambient sensor
 #define HAS_MQTT        1   // Adafruit MQTT + WiFi
 #define HAS_FLOW_ISR    1   // YF-S201
 #define HAS_CT_CLAMP    1   // SCT-013 via ADC
