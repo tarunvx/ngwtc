@@ -14,6 +14,7 @@ uint8_t menu_selectedIndex();
 // For UI rendering of the editor screen
 const char* menu_editTitle();   // e.g. "MIN Water Level"
 int32_t     menu_editValue();   // current value being edited
-const char* menu_editUnit();    // e.g. "%", "ms", "mV"
+const char* menu_editUnit();
+bool        menu_editIsDecimal();    // e.g. "%", "ms", "mV"
 
 #endif

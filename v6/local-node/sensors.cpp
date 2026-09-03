@@ -281,9 +281,17 @@ uint8_t  sensors_levelPct()       { return s_lastLevel; }
 bool     sensors_currentPresent() { return s_currentPresent; }
 uint16_t sensors_currentMv()      { return s_lastCurrentMv; }
 uint16_t sensors_currentOffsetMv(){ return s_ctOffsetMv; }
-uint16_t sensors_currentAmps()    {
-  return (uint16_t)(((uint32_t)s_lastCurrentMv * CT_AMPS_PER_MV_X1000 + 500) / 1000);
+
+// Amps x10, with the NVS trim applied. The CT reads a couple of amps at rest
+// (burden/bias residue), so ctCalAmps shifts the whole scale to read true zero;
+// clamped at 0 because a negative current is meaningless here.
+uint16_t sensors_currentAmpsX10() {
+  int32_t x10 = (int32_t)(((uint32_t)s_lastCurrentMv * CT_AMPS_PER_MV_X1000 + 50) / 100);
+  x10 += (int32_t)settings().ctCalAmps * 10;
+  return (uint16_t)(x10 < 0 ? 0 : x10);
 }
+
+uint16_t sensors_currentAmps()    { return (uint16_t)((sensors_currentAmpsX10() + 5) / 10); }
 uint16_t sensors_flowLpmX10()     { return s_flowSmoothed; }  // smoothed + thresholded
 // Single source of truth for the "flow present" cutoff used by the state
 // machine + safety. Backed by the NVS setting flowNoFlowThresh (editable via

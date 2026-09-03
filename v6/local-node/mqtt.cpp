@@ -83,7 +83,7 @@ bool mqtt_dispatchCmd(const char* line) {
       }
       if (n >= 6 && strcmp(tokens[4], "TIMER") == 0) {
         uint32_t mins = atoi(tokens[5]);
-        settings_setU32("timer1Ms", mins * 60000UL);
+        settings_setU16("timer1Sec", (uint16_t)(mins * 60));
         // Simulate timer button press → state machine handles STARTING
         e.type = EV_BUTTON; e.p.btn = { BTN2, PRESS_SHORT };
       } else {
@@ -124,6 +124,7 @@ bool mqtt_dispatchCmd(const char* line) {
     else if (strcmp(act, "TIMER")  == 0) m = MODE_TIMER;
     else if (strcmp(act, "SLEEP")  == 0) m = MODE_SLEEP;
     else if (strcmp(act, "MAINT")  == 0) m = MODE_MAINTENANCE;
+    else if (strcmp(act, "MD1")    == 0) m = MODE_MD1;
     if (m < 0) { mqtt_publishAck(id, false, "BAD_MODE"); return true; }
     e.type = EV_MODE_REQ; e.p.i32 = m;
     sendEvent(e);

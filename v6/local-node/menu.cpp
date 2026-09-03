@@ -19,11 +19,15 @@ enum MenuItem : uint8_t {
   MI_MODE_AUTO = 0,
   MI_MODE_MANUAL,
   MI_MODE_TIMER,
+  MI_MODE_MD1,
   MI_SLEEP_TOGGLE,
   MI_SMART_SENSE,
   MI_OVERFLOW_ONCE,
   MI_LED_SOURCE,
   MI_DIAG_MODE,
+  MI_SILENT_MODE,
+  MI_IGNORE_ACTUATION,
+  MI_SILENT_ON_OFFFB,
   MI_BYPASS_CURRENT,
   MI_BYPASS_FLOW,
   MI_BYPASS_FEEDBACK,
@@ -39,6 +43,7 @@ enum MenuItem : uint8_t {
   MI_SET_TIMER1,
   MI_SET_TIMER2,
   MI_SET_CT_THRESH,
+  MI_SET_CT_CAL,
   MI_SHOW_UPTIME,
   MI_RESET_FAULTS,
   MI_SHOW_FAULTS,
@@ -52,11 +57,15 @@ static const char* kLabels[MI_COUNT] = {
   "Mode: AUTO",
   "Mode: MANUAL",
   "Mode: TIMER",
+  "Mode: MD1",
   "Toggle SLEEP",
   "Smart-Sense",
   "Ignore Full 1x",
   "LED: Flt/US",
   "Diagnostics",
+  "Silent Mode",
+  "MD1: No Actuate",
+  "MD1: Stop on FB",
   "Bypass I-Sense",
   "Bypass Flow",
   "Bypass Feedback",
@@ -72,6 +81,7 @@ static const char* kLabels[MI_COUNT] = {
   "Timer 1 (s)",
   "Timer 2 (s)",
   "CT Thresh (mV)",
+  "CT Calib (A)",
   "Show Uptime",
   "Clear Faults",
   "Show Faults",
@@ -92,6 +102,7 @@ static int32_t s_editVal = 0;
 static int32_t s_editMin = 0;
 static int32_t s_editMax = 100;
 static int32_t s_editStep = 1;
+static bool    s_editDecimal = false;   // render as value/10 with one decimal
 
 // Function pointer to commit the edited value
 typedef void (*CommitFn)(int32_t val);
@@ -113,14 +124,16 @@ uint8_t menu_selectedIndex()          { return s_sel; }
 const char* menu_editTitle() { return s_editTitle; }
 int32_t     menu_editValue() { return s_editVal; }
 const char* menu_editUnit()  { return s_editUnit; }
+bool        menu_editIsDecimal() { return s_editDecimal; }
 
 // --- Editor helpers ---
 static void startEdit(const char* title, const char* unit,
                       int32_t current, int32_t minV, int32_t maxV, int32_t step,
-                      CommitFn fn) {
+                      CommitFn fn, bool decimal = false) {
   s_editing   = true;
   s_editTitle = title;
   s_editUnit  = unit;
+  s_editDecimal = decimal;
   s_editVal   = current;
   s_editMin   = minV;
   s_editMax   = maxV;
@@ -136,10 +149,11 @@ static void commitUiDim(int32_t v)     { settings_setU16("uiDimMs", (uint16_t)(v
 static void commitFlowThresh(int32_t v){ settings_setU16("flowNoFlowThresh", (uint16_t)v); }
 static void commitPulseOn(int32_t v)   { settings_setU32("pulseOnMs", (uint32_t)v); }
 static void commitPulseOff(int32_t v)  { settings_setU32("pulseOffMs", (uint32_t)v); }
-static void commitDryRun(int32_t v)    { settings_setU32("dryRunMs", (uint32_t)v); }
-static void commitMaxRun(int32_t v)    { settings_setU32("maxRuntimeMs", (uint32_t)v * 1000UL); }
-static void commitTimer1(int32_t v)    { settings_setU32("timer1Ms", (uint32_t)v * 1000UL); }
-static void commitTimer2(int32_t v)    { settings_setU32("timer2Ms", (uint32_t)v * 1000UL); }
+static void commitDryRun(int32_t v)    { settings_setU16("dryRunSec",     (uint16_t)v); }
+static void commitMaxRun(int32_t v)    { settings_setU16("maxRuntimeMin", (uint16_t)v); }
+static void commitTimer1(int32_t v)    { settings_setU16("timer1Sec",     (uint16_t)v); }
+static void commitTimer2(int32_t v)    { settings_setU16("timer2Sec",     (uint16_t)v); }
+static void commitCtCal(int32_t v)     { settings_setU8 ("ctCalAmps", (uint8_t)(int8_t)v); }
 static void commitCtThresh(int32_t v)  { settings_setU16("ctThreshMv", (uint16_t)v); }
 
 // --- Activate menu item ---
@@ -159,6 +173,29 @@ static void activate() {
     case MI_MODE_TIMER: {
       Event e{}; e.type = EV_MODE_REQ; e.p.i32 = MODE_TIMER; sendEvent(e);
       ui_showPopup("Mode: TIMER");
+      break;
+    }
+    case MI_MODE_MD1: {
+      Event e{}; e.type = EV_MODE_REQ; e.p.i32 = MODE_MD1; sendEvent(e);
+      ui_showPopup("Mode: MD1");
+      break;
+    }
+    case MI_SILENT_MODE: {
+      bool on = !settings().silentMode;
+      settings_setBool("silentMode", on);
+      ui_showPopup(on ? "Silent: ON" : "Silent: OFF");
+      break;
+    }
+    case MI_IGNORE_ACTUATION: {
+      bool on = !settings().ignoreActuation;
+      settings_setBool("ignoreActuation", on);
+      ui_showPopup(on ? "MD1 Actuate: NO" : "MD1 Actuate: YES");
+      break;
+    }
+    case MI_SILENT_ON_OFFFB: {
+      bool on = !settings().silentBzrOnOffFB;
+      settings_setBool("silentBzrOnOffFB", on);
+      ui_showPopup(on ? "Stop on FB: ON" : "Stop on FB: OFF");
       break;
     }
     case MI_SLEEP_TOGGLE: {
@@ -233,7 +270,9 @@ static void activate() {
       return;
     }
     case MI_SET_FLOW_THRESH:
-      startEdit("No-Flow Thr", "x10Lpm", settings().flowNoFlowThresh, 0, 100, 5, commitFlowThresh);
+      // Shown and edited in L/min with one decimal; stored as lpm x10, so a
+      // step of 2 is 0.2 L/min.
+      startEdit("No-Flow Thr", "L/min", settings().flowNoFlowThresh, 0, 200, 2, commitFlowThresh, true);
       return;
     case MI_SET_PULSE_ON:
       startEdit("Pulse ON", "ms", settings().pulseOnMs, 200, 5000, 100, commitPulseOn);
@@ -242,19 +281,22 @@ static void activate() {
       startEdit("Pulse OFF", "ms", settings().pulseOffMs, 200, 5000, 100, commitPulseOff);
       return;
     case MI_SET_DRYRUN:
-      startEdit("Dry-Run", "ms", settings().dryRunMs, 5000, 60000, 1000, commitDryRun);
+      startEdit("Dry-Run", "s", settings().dryRunSec, 5, 120, 1, commitDryRun);
       return;
     case MI_SET_MAX_RUNTIME:
-      startEdit("Max Runtime", "s", settings().maxRuntimeMs / 1000, 60, 7200, 60, commitMaxRun);
+      startEdit("Max Runtime", "min", settings().maxRuntimeMin, 1, 240, 1, commitMaxRun);
       return;
     case MI_SET_TIMER1:
-      startEdit("Timer 1", "s", settings().timer1Ms / 1000, 30, 3600, 30, commitTimer1);
+      startEdit("Timer 1", "s", settings().timer1Sec, 30, 3600, 30, commitTimer1);
       return;
     case MI_SET_TIMER2:
-      startEdit("Timer 2", "s", settings().timer2Ms / 1000, 30, 3600, 30, commitTimer2);
+      startEdit("Timer 2", "s", settings().timer2Sec, 30, 3600, 30, commitTimer2);
       return;
     case MI_SET_CT_THRESH:
       startEdit("CT Threshold", "mV", settings().ctThreshMv, 10, 500, 10, commitCtThresh);
+      return;
+    case MI_SET_CT_CAL:
+      startEdit("CT Calib", "A", settings().ctCalAmps, -20, 20, 1, commitCtCal);
       return;
     case MI_SHOW_UPTIME: {
       uint32_t up = millis()/1000;

@@ -34,6 +34,16 @@ static bool     s_overflowIgnore  = false;
 static uint32_t s_overflowArmedAt = 0;
 #define OVERFLOW_ARM_TIMEOUT_MS 60000UL   // auto-disarm if armed but no run starts
 
+// MD1 tank-full alarm latch. Armed on feedback-ON (a manual start), disarmed on
+// feedback-OFF. Water surface turbulence makes the 100% float chatter for a
+// while after the pump stops, so a level-driven alarm re-triggers repeatedly and
+// the user has to silence it over and over. Latching on the feedback edge
+// instead means: once the pump is confirmed off, the full alarm is done until
+// the next manual start.
+static bool s_md1Armed     = false;   // a manual run is in progress
+static bool s_md1FullAlarm = false;   // the full alarm is currently sounding
+static bool s_md1PulsedOff = false;   // the auto OFF stroke has been issued once
+
 // Fault repeat counter
 struct RepeatCtr { uint32_t firstAt; uint8_t count; FaultCode last; };
 static RepeatCtr s_rep = {0, 0, FC_NONE};
@@ -63,6 +73,11 @@ bool sm_isPumpRunningState(SystemState s) {
 SystemState sm_state() { return s_state; }
 
 uint32_t sm_pumpStartedAt() { return s_pumpStartedAt; }
+
+// True while the MD1 tank-full alarm should sound. Separate from ST_FULL
+// because in MD1 the pump keeps running (it is under manual control) while the
+// tank reads full.
+bool sm_fullAlarmActive() { return s_md1FullAlarm; }
 
 // ---- One-shot overflow override -----------------------------------------
 bool sm_overflowIgnore() { return s_overflowIgnore; }
@@ -125,6 +140,7 @@ static void enterState(SystemState ns) {
       actuator_pulseOff();
       s_timerActive = false;
       s_overflowIgnore = false;   // one-shot override consumed on any stop
+      s_md1FullAlarm = false;
       break;
     case ST_FAULT_LATCHED:
       actuator_panicOff();
@@ -310,7 +326,7 @@ void sm_handleEvent(const Event& e) {
         if (canStartPump()) {
           s_timerActive = true;
           s_timerWhich = TMR_1;
-          s_timerDeadline = millis() + settings().timer1Ms;
+          s_timerDeadline = millis() + settings_timer1Ms();
           enterState(ST_STARTING);
         }
 #else
@@ -324,7 +340,7 @@ void sm_handleEvent(const Event& e) {
         if (canStartPump()) {
           s_timerActive = true;
           s_timerWhich = TMR_2;
-          s_timerDeadline = millis() + settings().timer2Ms;
+          s_timerDeadline = millis() + settings_timer2Ms();
           enterState(ST_STARTING);
         }
 #else
@@ -350,6 +366,18 @@ void sm_handleEvent(const Event& e) {
 
     case EV_FB_ON:
       if (s_state == ST_STARTING && e.p.boolean) s_sawFb = true;
+      // MD1: the starter is the only way the pump turns on, so feedback-ON is
+      // the run trigger. Arms the tank-full alarm for exactly this run.
+      if (settings().mode == MODE_MD1 && s_state == ST_IDLE && e.p.boolean) {
+        Serial.printf("%s MD1: feedback ON — manual run detected\n", LOG_TAG_SM);
+        s_md1Armed     = true;
+        s_md1FullAlarm = false;
+        s_md1PulsedOff = false;
+        enterState(ST_MANUAL_ON);
+        s_pumpStartedAt = millis();
+        ui_requestUpdate();
+        return;
+      }
       // Smart-Sense: feedback switch pressed externally while IDLE
       if (s_state == ST_IDLE && e.p.boolean && settings().smartSense && !settings().bypassFeedback) {
         Serial.printf("%s SMART-SENSE: feedback detected, entering monitoring\n", LOG_TAG_SM);
@@ -361,6 +389,19 @@ void sm_handleEvent(const Event& e) {
 
     case EV_FB_OFF:
       if (s_state == ST_STOPPING && e.p.boolean) s_sawFb = true;
+      // MD1: feedback-OFF means the starter was switched off. Disarm the alarm
+      // for good — level chatter from turbulence must not re-trigger it.
+      if (settings().mode == MODE_MD1 && e.p.boolean && s_md1Armed) {
+        Serial.printf("%s MD1: feedback OFF — run ended, full alarm disarmed\n", LOG_TAG_SM);
+        s_md1Armed     = false;
+        s_md1PulsedOff = false;
+        if (settings().silentBzrOnOffFB) {
+          s_md1FullAlarm = false;
+          buzzer_silence();
+        }
+        if (sm_isPumpRunningState(s_state)) enterState(ST_IDLE);
+        ui_requestUpdate();
+      }
       return;
 
     case EV_CURRENT_PRESENT:
@@ -476,7 +517,7 @@ void sm_tick() {
         enterState(ST_STOPPING);
         break;
       }
-      if (needFlow && !s_sawFlow && since > settings().dryRunMs) {
+      if (needFlow && !s_sawFlow && since > settings_dryRunMs()) {
         recordFault(FC_DRY_RUN, SEV_ERROR);
         enterState(ST_STOPPING);
         break;
@@ -517,6 +558,31 @@ void sm_tick() {
     case ST_AUTO_FILLING:
     case ST_MANUAL_ON:
     case ST_TIMER_RUNNING: {
+      // MD1: the pump is under manual control, so reaching 100% raises an alarm
+      // rather than stopping the run. The OFF stroke is issued once (unless
+      // ignoreActuation); the run only ends when feedback-OFF is seen.
+      if (settings().mode == MODE_MD1 && s_md1Armed) {
+        if (sensors_levelPct() >= 100) {
+          if (!s_md1FullAlarm) {
+            s_md1FullAlarm = true;
+            Serial.printf("%s MD1: tank FULL — alarm on\n", LOG_TAG_SM);
+            ui_showPopup("TANK FULL", 3000);
+          }
+          if (!settings().ignoreActuation && !s_md1PulsedOff) {
+            s_md1PulsedOff = true;
+            Serial.printf("%s MD1: issuing OFF stroke\n", LOG_TAG_SM);
+            actuator_pulseOff();
+          }
+        }
+        // Deliberately NOT cleared when the level dips below 100 — turbulence
+        // would otherwise re-arm and re-sound it. Only feedback-OFF ends it.
+        if (sinceMs(s_pumpStartedAt) > settings_maxRuntimeMs()) {
+          recordFault(FC_OVERRUN, SEV_ERROR);
+          enterState(ST_STOPPING);
+        }
+        break;
+      }
+
       // Reaching 100% is a normal stop, not a fault — go straight to STOPPING.
       // Exception: a MANUAL/TIMER run with the one-shot overflow override armed
       // keeps running past full ("get water even if the tank is full").
@@ -525,7 +591,7 @@ void sm_tick() {
         break;
       }
       // max runtime
-      if (sinceMs(s_pumpStartedAt) > settings().maxRuntimeMs) {
+      if (sinceMs(s_pumpStartedAt) > settings_maxRuntimeMs()) {
         recordFault(FC_OVERRUN, SEV_ERROR);
         enterState(ST_STOPPING);
         break;

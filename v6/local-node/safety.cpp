@@ -18,7 +18,7 @@ void safety_tick() {
   static SystemState s_lastSt = ST_IDLE;
   if (sm_isPumpRunningState(st)) {
     if (!sm_isPumpRunningState(s_lastSt)) s_runStart = millis();
-    if (sinceMs(s_runStart) > settings().maxRuntimeMs + 5000UL) {
+    if (sinceMs(s_runStart) > settings_maxRuntimeMs() + 5000UL) {
       // SM should have caught it — escalate
       actuator_panicOff();
       Event e{}; e.type = EV_PANIC_STOP; e.p.i32 = FC_OVERRUN;

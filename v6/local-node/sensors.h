@@ -10,7 +10,8 @@ uint8_t  sensors_levelPct();
 bool     sensors_currentPresent();
 uint16_t sensors_currentMv();
 uint16_t sensors_currentOffsetMv();  // measured CT bias mid-rail (diagnostics)
-uint16_t sensors_currentAmps();  // CT mV scaled to whole amps (display only)
+uint16_t sensors_currentAmps();
+uint16_t sensors_currentAmpsX10();  // CT mV scaled to whole amps (display only)
 uint16_t sensors_flowLpmX10();
 uint16_t sensors_flowThreshX10();   // configured "flow present" cutoff (NVS flowNoFlowThresh, min 1)
 uint32_t sensors_totalLitersX10();

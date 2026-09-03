@@ -208,7 +208,12 @@ void ui_tick() {
       // Row 1-2: value (font 2, large)
       oled.setTextSize(2);
       oled.setCursor(10, 20);
-      oled.printf("%ld %s", (long)menu_editValue(), menu_editUnit());
+      if (menu_editIsDecimal()) {
+        long v = (long)menu_editValue();
+        oled.printf("%ld.%ld %s", v / 10, v < 0 ? -(v % 10) : (v % 10), menu_editUnit());
+      } else {
+        oled.printf("%ld %s", (long)menu_editValue(), menu_editUnit());
+      }
       // Row 3: hints (font 1)
       oled.setTextSize(1);
       oled.setCursor(0, 48);
@@ -345,24 +350,21 @@ void ui_tick() {
   drawLink(104, 0, link_alive());
   drawWifi(118, 0, WiFi.isConnected());
 
-  // Row 2 (y=16): ultrasonic level   mode
+  // Row 2 (y=16): ultrasonic level   mode (3 letters)
   curs(0, 16);
-  oled.printf("US:%3u%%", sensors_ultrasonicLevelPct());
-  // Mode at right
-  const char* mn = modeName(settings().mode);
-  char mn4[5]; strncpy(mn4, mn, 4); mn4[4] = 0;
+  oled.printf("%3u%%", sensors_ultrasonicLevelPct());
   oled.setCursor(92, 16);
-  oled.print(mn4);
+  oled.print(modeNameShort(settings().mode));
 
-  // Row 3 (y=32): flow (whole L/min) + current (whole amps)
+  // Row 3 (y=32): flow and current, both to 1 decimal
   curs(0, 32);
-  uint16_t fl  = (uint16_t)((sensors_flowLpmX10() + 5) / 10);
-  uint16_t ia  = sensors_currentAmps();
-  if (fl > 99) fl = 99;
-  if (ia > 99) ia = 99;
-  oled.printf("FL:%2u", fl);
+  uint16_t fl10 = sensors_flowLpmX10();
+  uint16_t ia10 = sensors_currentAmpsX10();
+  if (fl10 > 999) fl10 = 999;
+  if (ia10 > 999) ia10 = 999;
+  oled.printf("%2u.%uL", fl10 / 10, fl10 % 10);
   curs(68, 32);
-  oled.printf("I:%2u", ia);
+  oled.printf("%2u.%uA", ia10 / 10, ia10 % 10);
 
   // Row 4 (y=48): temp + humidity (font 1 to fit both)
   oled.setTextSize(1);

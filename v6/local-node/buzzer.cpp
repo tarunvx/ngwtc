@@ -2,6 +2,7 @@
 #include "pins.h"
 #include "time_utils.h"
 #include "state_machine.h"
+#include "settings.h"
 #include <Arduino.h>
 
 static BuzzPattern s_pat = BZ_NONE;
@@ -92,15 +93,27 @@ void buzzer_tick() {
 // actual pattern change, so a user silence persists until the state changes.
 void buzzer_autoTick() {
   BuzzPattern want;
-  switch (sm_state()) {
-    case ST_FULL:          want = BZ_FULL;    break;  // continuous alert
-    case ST_FAULT_LATCHED: want = BZ_LATCHED; break;
-    case ST_ERROR:         want = BZ_ERROR;   break;
-    case ST_STARTING:
-    case ST_AUTO_FILLING:
-    case ST_MANUAL_ON:
-    case ST_TIMER_RUNNING: want = BZ_RUN;     break;  // slow chirp while running
-    default:               want = BZ_NONE;    break;
+
+  // MD1 raises the tank-full alarm while the pump is still running, so it is
+  // checked before the state map.
+  if (sm_fullAlarmActive()) {
+    want = BZ_FULL;
+  } else {
+    switch (sm_state()) {
+      case ST_FULL:          want = BZ_FULL;    break;  // continuous alert
+      case ST_FAULT_LATCHED: want = BZ_LATCHED; break;
+      case ST_ERROR:         want = BZ_ERROR;   break;
+      case ST_STARTING:
+      case ST_AUTO_FILLING:
+      case ST_MANUAL_ON:
+      case ST_TIMER_RUNNING: want = BZ_RUN;     break;  // slow chirp while running
+      default:               want = BZ_NONE;    break;
+    }
   }
+
+  // Global mute: everything is suppressed except a latched fault, which needs a
+  // human to intervene and so must always be audible.
+  if (settings().silentMode && want != BZ_LATCHED) want = BZ_NONE;
+
   if (want != s_pat) buzzer_set(want);
 }

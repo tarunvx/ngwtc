@@ -26,6 +26,7 @@ const char*   sm_stateName(SystemState s);
 bool          sm_isPumpRunningState(SystemState s);
 void          sm_clearLatched();
 uint32_t      sm_pumpStartedAt(); // millis() when pump last entered STARTING
+bool          sm_fullAlarmActive();  // MD1 tank-full alarm is sounding
 
 // One-shot "ignore full-tank cutoff" override (deliberate overflow run).
 // Volatile / RAM-only — NEVER persisted, defaults false every boot. Consumed

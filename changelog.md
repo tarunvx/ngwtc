@@ -8,7 +8,86 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.4.0** (`esp-32-dev/`) · **v6.13.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
+Current: **v5.4.0** (`esp-32-dev/`) · **v7.0.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
+
+> **v5 (`esp-32-dev/`) has NOT been updated to 7.0.0 and now diverges.** The MD1
+> mode, unit re-basing, CT trim and silent flags are v6-only. Sync before doing
+> any further v5 work.
+
+---
+# Version 7.0.0 — v6/local-node
+## MD1 mode, user-facing units, CT trim, silent mode — **breaks NVS**
+
+MAJOR because the NVS layout changed incompatibly. `MAGIC` is bumped
+0x5A11 → 0x5A12, forcing a clean defaults load. **All stored settings are lost
+on first boot** — unavoidable, because four fields changed units and the old
+values would be catastrophically misread (`1800000` read as minutes is 3.4 years).
+
+### Added — MD1 mode (`MODE_MD1 = 5`)
+
+For installations where the pump is started only by the physical starter.
+Firmware never starts the pump; it watches, alarms, and optionally stops.
+
+```
+feedback ON   -> ST_MANUAL_ON, arm the full alarm for this run
+level >= 100  -> tank-full alarm; issue ONE OFF stroke (unless ignoreActuation)
+feedback OFF  -> disarm, silence, return to IDLE
+```
+
+**Why the alarm latches on the feedback edge rather than the level.** The 100%
+float chatters from surface turbulence while filling and for some time after the
+pump stops. A level-driven alarm therefore re-triggers after every B1 silence,
+and the user has to keep silencing it until the water settles. Latching on
+feedback-OFF means: once the pump is confirmed off, that run's alarm is finished
+and cannot be re-armed until the next manual start. `s_md1FullAlarm` is
+deliberately **not** cleared when the level dips below 100.
+
+This affects the tank-full tone only. Faults are untouched — `silentBzrOnOffFB`
+cannot silence a fault.
+
+- `ignoreActuation` — alarm only, never drive the OFF stroke (for installs with
+  no relay/stroke fitted).
+- `silentBzrOnOffFB` (default true) — cancel the full alarm on feedback-OFF.
+- `sm_fullAlarmActive()` — lets the buzzer sound the alarm while the pump is
+  still running, which `ST_FULL` alone cannot express.
+
+### Added — `silentMode`
+
+Global mute. Everything is suppressed **except `BZ_LATCHED`**, which needs human
+intervention and so must stay audible.
+
+### Added — `ctCalAmps` (int8, ±20 A)
+
+The CT reads 1–2 A at rest, so the displayed value was misleading even though the
+`ctThreshMv` threshold masked it for control purposes. This trims the whole
+scale, applied in `sensors_currentAmpsX10()` and clamped at zero. Menu:
+"CT Calib (A)". Over MQTT the value is a reinterpreted byte, so
+`SET:ctCalAmps:254` means −2.
+
+### Changed — NVS units are now what a user edits
+
+| Was | Now | Menu |
+|---|---|---|
+| `dryRunMs` (u32) | `dryRunSec` (u16) | seconds, step 1 |
+| `maxRuntimeMs` (u32) | `maxRuntimeMin` (u16) | minutes, step 1 |
+| `timer1Ms` / `timer2Ms` (u32) | `timer1Sec` / `timer2Sec` (u16) | seconds, step 30 |
+| `flowNoFlowThresh` | unchanged (lpm ×10) | now **rendered as L/min with one decimal**, step 0.2 |
+
+Conversion to milliseconds happens at the use site via `settings_dryRunMs()`,
+`settings_maxRuntimeMs()`, `settings_timer1Ms()`, `settings_timer2Ms()` — declared
+in `settings.h`. **Every millis() comparison must go through these.**
+
+The value editor gained a decimal mode (`menu_editIsDecimal()`), so the flow
+threshold reads `2.0 L/min` instead of `20 x10Lpm`.
+
+### Changed — OLED dashboard
+
+| Row | Was | Now |
+|---|---|---|
+| 1 | level · state · icons | unchanged |
+| 2 | `US:077%` · 4-char mode | `77%` · **3-letter mode** (`modeNameShort()`) |
+| 3 | `FL:12  I:10` (whole) | `12.6L  10.3A` (**one decimal**) |
+| 4–5 | temp/RH · day-time | unchanged |
 
 ---
 # Version 6.13.0 / 5.4.0 — both trees

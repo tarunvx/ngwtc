@@ -3,7 +3,10 @@
 #include <Preferences.h>
 
 #define NVS_NS  "swtc"
-#define MAGIC   0x5A11
+// 0x5A12: units of dryRun/maxRuntime/timer1/timer2 changed and new flags were
+// added. Bumping this forces a clean defaults load — the old blob's values
+// would be catastrophically misread under the new units.
+#define MAGIC   0x5A12
 
 static Settings s_cfg;
 static Preferences s_prefs;
@@ -13,17 +16,18 @@ static void loadDefaults() {
   s_cfg.cutoffMaxPct    = 100;
   s_cfg.pulseOnMs       = DEF_PULSE_ON_MS;
   s_cfg.pulseOffMs      = DEF_PULSE_OFF_MS;
-  s_cfg.dryRunMs        = DEF_DRYRUN_MS;
+  s_cfg.dryRunSec       = DEF_DRYRUN_SEC;
   s_cfg.feedbackMs      = DEF_FEEDBACK_MS;
   s_cfg.currentMs       = DEF_CURRENT_MS;
   s_cfg.currentOffMs    = DEF_CURRENT_OFF_MS;
   s_cfg.flowOffMs       = DEF_FLOW_OFF_MS;
-  s_cfg.maxRuntimeMs    = DEF_MAX_RUNTIME_MS;
-  s_cfg.timer1Ms        = DEF_TIMER1_MS;
-  s_cfg.timer2Ms        = DEF_TIMER2_MS;
+  s_cfg.maxRuntimeMin   = DEF_MAX_RUNTIME_MIN;
+  s_cfg.timer1Sec       = DEF_TIMER1_SEC;
+  s_cfg.timer2Sec       = DEF_TIMER2_SEC;
   s_cfg.flowKppl        = DEF_FLOW_KPPL;
   s_cfg.ctOffsetMv      = DEF_CT_OFFSET_MV;
   s_cfg.ctThreshMv      = DEF_CT_THRESH_MV;
+  s_cfg.ctCalAmps       = DEF_CT_CAL_AMPS;
   s_cfg.levelHystPct    = DEF_LEVEL_HYST;
   s_cfg.mode            = MODE_AUTO;
   s_cfg.sleepMode       = false;
@@ -37,6 +41,9 @@ static void loadDefaults() {
   s_cfg.bypassFlowSense      = false;
   s_cfg.bypassFeedback       = false;
   s_cfg.smartSense           = true;   // auto-detect external filling by default
+  s_cfg.ignoreActuation      = false;
+  s_cfg.silentBzrOnOffFB     = true;   // MD1 default: feedback-OFF cancels the alarm
+  s_cfg.silentMode           = false;
   s_cfg.flowNoFlowThresh     = 20;  // 2.0 L/min — filters EMI noise on long cables
   s_cfg.flowAvgSamples       = 4;
   s_cfg.magic           = MAGIC;
@@ -87,14 +94,10 @@ bool settings_setU32(const char* k, uint32_t v) {
   bool ok =
        _matchU32(k, "pulseOnMs",    s_cfg.pulseOnMs,    v)
     || _matchU32(k, "pulseOffMs",   s_cfg.pulseOffMs,   v)
-    || _matchU32(k, "dryRunMs",     s_cfg.dryRunMs,     v)
     || _matchU32(k, "feedbackMs",   s_cfg.feedbackMs,   v)
     || _matchU32(k, "currentMs",    s_cfg.currentMs,    v)
     || _matchU32(k, "currentOffMs", s_cfg.currentOffMs, v)
-    || _matchU32(k, "flowOffMs",    s_cfg.flowOffMs,    v)
-    || _matchU32(k, "maxRuntimeMs", s_cfg.maxRuntimeMs, v)
-    || _matchU32(k, "timer1Ms",     s_cfg.timer1Ms,     v)
-    || _matchU32(k, "timer2Ms",     s_cfg.timer2Ms,     v);
+    || _matchU32(k, "flowOffMs",    s_cfg.flowOffMs,    v);
   if (ok) settings_save();
   return ok;
 }
@@ -106,6 +109,10 @@ bool settings_setU16(const char* k, uint16_t v) {
     || _matchU16(k, "ctThreshMv", s_cfg.ctThreshMv, v)
     || _matchU16(k, "ledAltMs", s_cfg.ledAltMs, v)
     || _matchU16(k, "uiDimMs",  s_cfg.uiDimMs,  v)
+    || _matchU16(k, "dryRunSec",     s_cfg.dryRunSec,     v)
+    || _matchU16(k, "maxRuntimeMin", s_cfg.maxRuntimeMin, v)
+    || _matchU16(k, "timer1Sec",     s_cfg.timer1Sec,     v)
+    || _matchU16(k, "timer2Sec",     s_cfg.timer2Sec,     v)
     || _matchU16(k, "flowNoFlowThresh",     s_cfg.flowNoFlowThresh,     v);
   if (ok) settings_save();
   return ok;
@@ -119,6 +126,9 @@ bool settings_setU8(const char* k, uint8_t v) {
     || _matchU8(k, "cutoffMinPct", s_cfg.cutoffMinPct, v)
     || _matchU8(k, "cutoffMaxPct", s_cfg.cutoffMaxPct, v)
     || _matchU8(k, "flowAvgSamples", s_cfg.flowAvgSamples, v);
+  // Signed trim: accepted as an unsigned byte and reinterpreted, so
+  // SET:ctCalAmps:254 means -2.
+  if (!ok && strcmp(k, "ctCalAmps") == 0) { s_cfg.ctCalAmps = (int8_t)v; ok = true; }
   if (ok) settings_save();
   return ok;
 }
@@ -132,7 +142,10 @@ bool settings_setBool(const char* k, bool v) {
     || _matchBool(k, "bypassCurrentSense", s_cfg.bypassCurrentSense, v)
     || _matchBool(k, "bypassFlowSense",    s_cfg.bypassFlowSense,    v)
     || _matchBool(k, "bypassFeedback",     s_cfg.bypassFeedback,     v)
-    || _matchBool(k, "smartSense",         s_cfg.smartSense,         v);
+    || _matchBool(k, "smartSense",         s_cfg.smartSense,         v)
+    || _matchBool(k, "ignoreActuation",    s_cfg.ignoreActuation,    v)
+    || _matchBool(k, "silentBzrOnOffFB",   s_cfg.silentBzrOnOffFB,   v)
+    || _matchBool(k, "silentMode",         s_cfg.silentMode,         v);
   if (ok) settings_save();
   return ok;
 }
@@ -144,6 +157,19 @@ const char* modeName(uint8_t m) {
     case MODE_TIMER:       return "TIMER";
     case MODE_SLEEP:       return "SLEEP";
     case MODE_MAINTENANCE: return "MAINT";
+    case MODE_MD1:         return "MD1";
     default:               return "?";
+  }
+}
+
+const char* modeNameShort(uint8_t m) {
+  switch (m) {
+    case MODE_AUTO:        return "AUT";
+    case MODE_MANUAL:      return "MAN";
+    case MODE_TIMER:       return "TMR";
+    case MODE_SLEEP:       return "SLP";
+    case MODE_MAINTENANCE: return "MNT";
+    case MODE_MD1:         return "MD1";
+    default:               return "???";
   }
 }

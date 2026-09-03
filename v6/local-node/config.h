@@ -8,7 +8,7 @@
 
 // Single source of truth for this tree's version. Bump the MINOR digit on
 // every change; MAJOR only for a redesign. Reported by GET:DIAG as fw=.
-#define FIRMWARE_VERSION  "6.13.0"
+#define FIRMWARE_VERSION  "7.0.0"
 
 // ---- Feature flags (compile-time) --------------------------
 #define HAS_OLED        1   // SSD1306 via I2C
@@ -44,14 +44,14 @@ enum LevelSource {
 // ---- Default tunables (ms) — all overridable in NVS -------
 #define DEF_PULSE_ON_MS         1000
 #define DEF_PULSE_OFF_MS        1000
-#define DEF_DRYRUN_MS           15000
+#define DEF_DRYRUN_SEC          15          // 15 s — water needs 15-20 s from 250 ft
 #define DEF_FEEDBACK_MS         1500
 #define DEF_CURRENT_MS          3000
 #define DEF_CURRENT_OFF_MS      4000
 #define DEF_FLOW_OFF_MS         8000
-#define DEF_MAX_RUNTIME_MS      1800000UL   // 30 min
-#define DEF_TIMER1_MS           300000UL    // 5 min
-#define DEF_TIMER2_MS           600000UL    // 10 min
+#define DEF_MAX_RUNTIME_MIN     30          // minutes
+#define DEF_TIMER1_SEC          300         // 5 min
+#define DEF_TIMER2_SEC          600         // 10 min
 #define DEF_OVERRUN_COOLDOWN_MS 60000UL
 #define DEF_FAULT_REPEAT_WINDOW 600000UL    // 10 min
 #define DEF_FAULT_REPEAT_LIMIT  3
@@ -67,6 +67,7 @@ enum LevelSource {
 #define CT_SAMPLE_MS            40
 // Display scaling for the CT clamp: SCT-013-030 is 30 A : 1 V => 0.030 A/mV.
 #define CT_AMPS_PER_MV_X1000    30
+#define DEF_CT_CAL_AMPS         0       // +/- trim on the displayed amps
 #define DEF_LEVEL_HYST          3       // %
 #define DEF_LED_ALT_MS          2500    // LED bar state<->level alternation (ms)
 #define DEF_UI_DIM_MS           30000   // OLED dims after this much idle time (ms)
