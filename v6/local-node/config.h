@@ -8,7 +8,7 @@
 
 // Single source of truth for this tree's version. Bump the MINOR digit on
 // every change; MAJOR only for a redesign. Reported by GET:DIAG as fw=.
-#define FIRMWARE_VERSION  "6.14.0"
+#define FIRMWARE_VERSION  "6.15.0"
 
 // ---- Feature flags (compile-time) --------------------------
 #define HAS_OLED        1   // SSD1306 via I2C
@@ -65,7 +65,7 @@ enum LevelSource {
 // "Current present" cutoff in AMPS x10. Compared against the trimmed, displayed
 // amps so the menu value and the screen agree. Must sit clear of the CT's idle
 // noise floor — too low and sensor noise spuriously trips Smart-Sense.
-#define DEF_CT_THRESH_AMP_X10   30      // 3.0 A
+#define DEF_CT_THRESH_AMP_X10   10      // 1.0 A
 // CT sampling window: 40 ms = 2 full mains cycles at 50 Hz.
 #define CT_SAMPLE_MS            40
 // Display scaling for the CT clamp: SCT-013-030 is 30 A : 1 V => 0.030 A/mV.

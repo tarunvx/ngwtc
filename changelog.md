@@ -8,10 +8,59 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.4.0** (`esp-32-dev/`) · **v6.14.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
+Current: **v5.4.0** (`esp-32-dev/`) · **v6.15.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
 
 > **v5 (`esp-32-dev/`) has NOT been updated past 5.4.0 and now diverges.** MD1,
 > the unit re-basing, CT trim and silent flags are v6-only.
+
+---
+# Version 6.15.0 — v6/local-node
+## MD1 force-stop bug, operating-screen decimals, minute heartbeat
+
+### Fixed — MD1 runs were being force-stopped, then latching
+
+Field logs showed a real manual run (`fl:34, i:300`) reach `MANUAL_ON` and then
+hit `FAULT_LATCHED` within 30 s, via repeated `NO_CURRENT` → `STOPPING` →
+`NO_FEEDBACK`.
+
+`EV_CURRENT_PRESENT(false)` while running forces `ST_STOPPING` — correct for
+AUTO/MANUAL/TIMER, wrong for MD1 where the pump is under manual control. Two
+consequences: a momentary current dip ended a healthy run, and entering
+`ST_STOPPING` fires `actuator_pulseOff()`, which would physically stop a pump the
+user wanted running. Three ERRORs inside the repeat window then latched.
+
+**In MD1 a run now ends only on feedback-OFF, or the max-runtime backstop.**
+This is the same reasoning that already excluded MD1 from the Smart-Sense paths.
+
+### Fixed — operating screen still showed integers
+
+6.14.0 changed the dashboard to one decimal but missed the **operating screen**,
+which is the one displayed while the pump runs. Both now render `12.6L` / `10.3A`
+from `sensors_currentAmpsX10()` — the same trimmed value the threshold compares
+against, so screen and logic cannot disagree.
+
+### Changed — running heartbeat is now once a minute
+
+`BZ_RUN` was an 80 ms chirp every 2 s, which is wearing over a 20-minute fill.
+Now a **long pulse (400 ms), gap, short pulse (120 ms), once every 60 s** — a
+distinct "still running" signature rather than a metronome.
+
+### Changed — `DEF_CT_THRESH_AMP_X10` 3.0 A → 1.0 A
+
+With `ctCalAmps` trimming idle to 0.0 A, a 3.0 A threshold sat above the observed
+running current (~1.4 A after trim) and reported `NO_CURRENT` on a running pump.
+
+> **Tuning order matters:** set `CT Calib` first so an idle pump reads 0.0 A,
+> then set `CT Thresh` between idle and running current. Both are in amps and
+> both match the screen.
+
+### Added
+
+- **`Sensor Test` menu item** — enables the monitor and jumps straight to the
+  live-sensor page. Previously it existed only as page 2 of `Diagnostics`,
+  reachable via undocumented B2/B3 paging, so it was undiscoverable.
+- **`ia` in the status JSON** — trimmed amps ×10. `i` remains raw millivolts for
+  diagnostics; `ia` is the value the threshold and the screen use.
 
 ---
 # Version 6.14.0 — v6/local-node

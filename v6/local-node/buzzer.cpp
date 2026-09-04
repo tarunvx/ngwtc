@@ -68,11 +68,14 @@ void buzzer_tick() {
   switch (s_pat) {
     case BZ_NONE:     out(false); break;
     case BZ_SHORT:    out(t < 100); if (t > 100) s_pat = BZ_NONE; break;
-    case BZ_RUN:
-      // Pump running: a short, gentle chirp every 2 s ("I'm on") — runs
-      // indefinitely until the state leaves a running state.
-      out((t % 2000) < 80);
+    case BZ_RUN: {
+      // Pump running: a "still alive" signature once a minute rather than a
+      // constant heartbeat, which was tiring to listen to. One long pulse, a
+      // gap, then one short pulse.
+      uint32_t p = t % 60000;
+      out(p < 400 || (p >= 600 && p < 720));
       break;
+    }
     case BZ_FULL:
       // Tank full: a steady, insistent beep (~1.7 Hz, 300 ms on / 300 ms off)
       // until acknowledged (B1 silence) or the level drops out of FULL — the

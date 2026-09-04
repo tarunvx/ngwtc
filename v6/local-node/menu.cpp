@@ -48,6 +48,7 @@ enum MenuItem : uint8_t {
   MI_SET_CT_CAL,
   MI_SET_FLOW_THRESH,
   // -- Display --
+  MI_SENSOR_TEST,
   MI_DIAG_MODE,
   MI_LED_SOURCE,
   MI_SET_LED_ALT,
@@ -94,6 +95,7 @@ static const char* kLabels[MI_COUNT] = {
   "CT Calib (A)",
   "Flow Thr (L/m)",
 
+  "Sensor Test",
   "Diagnostics",
   "LED: Flt/US",
   "LED Alt (ms)",
@@ -258,6 +260,15 @@ static void activate() {
       bool wasUs = (settings().levelSource == LVL_ULTRASONIC);
       settings_setU8("levelSource", wasUs ? LVL_FLOAT : LVL_ULTRASONIC);
       ui_showPopup(wasUs ? "LED: Floats" : "LED: Ultrasonic");
+      break;
+    }
+    case MI_SENSOR_TEST: {
+      // Turn the monitor on and jump straight to the live-sensor page, so the
+      // feature is reachable without knowing about the B2/B3 paging.
+      ui_setDiagMode(true);
+      ui_setDiagPage(1);
+      menuClose();
+      ui_showPopup("Sensor Test", 1200);
       break;
     }
     case MI_DIAG_MODE: {

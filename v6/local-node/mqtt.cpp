@@ -209,14 +209,15 @@ void mqtt_publishStatus() {
   // packet in a small fixed buffer and silently truncates anything larger.
   snprintf(json, sizeof(json),
     "{\"md\":\"%s\",\"st\":\"%s\",\"slp\":%u,"
-    "\"lvl\":%u,\"fl\":%u,\"i\":%u,\"io\":%u,\"f\":%u,"
+    "\"lvl\":%u,\"fl\":%u,\"i\":%u,\"ia\":%u,\"io\":%u,\"f\":%u,"
     "\"t\":%d,\"rh\":%u,\"d\":%u,\"us\":%u,"
     "\"bi\":%u,\"bf\":%u,\"ov\":%u,"
     "\"lk\":%u,\"la\":%lu,\"ls\":%u,\"ld\":%lu,\"ce\":%lu,\"tr\":%lu}",
     modeName(settings().mode), sm_stateName(sm_state()),
     settings().sleepMode ? 1u : 0u,
     sensors_levelPct(), sensors_flowLpmX10(),
-    sensors_currentMv(), sensors_currentOffsetMv(), (unsigned)faultlog_count(),
+    sensors_currentMv(), sensors_currentAmpsX10(),
+    sensors_currentOffsetMv(), (unsigned)faultlog_count(),
     (int)sensors_tempCx10(), (unsigned)sensors_rhX10(),
     (unsigned)sensors_distanceMm(), (unsigned)sensors_ultrasonicLevelPct(),
     settings().bypassCurrentSense ? 1u : 0u,

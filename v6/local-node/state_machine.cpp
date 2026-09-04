@@ -432,8 +432,11 @@ void sm_handleEvent(const Event& e) {
       if (s_state == ST_STARTING && e.p.boolean) s_sawCurrent = true;
       else if (s_state == ST_STOPPING && !e.p.boolean) s_sawCurrent = true;
       else if (sm_isPumpRunningState(s_state) && !e.p.boolean) {
-        // Only fault if current sense is NOT bypassed
-        if (!settings().bypassCurrentSense) {
+        // MD1: the pump is under manual control. A current dip must NOT force a
+        // stop — doing so drove STOPPING -> NO_FEEDBACK -> repeat -> LATCHED,
+        // and the OFF pulse from STOPPING would have stopped a healthy pump.
+        // In MD1 only feedback-OFF (or the max-runtime backstop) ends a run.
+        if (settings().mode != MODE_MD1 && !settings().bypassCurrentSense) {
           recordFault(FC_NO_CURRENT, SEV_ERROR);
           enterState(ST_STOPPING);
         }

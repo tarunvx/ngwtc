@@ -61,6 +61,12 @@ static uint8_t s_diagPage = 0;
 
 uint8_t ui_diagPage() { return s_diagPage; }
 
+void ui_setDiagPage(uint8_t page) {
+  s_diagPage = (uint8_t)(page % UI_DIAG_PAGES);
+  ui_wake();
+  ui_requestUpdate();
+}
+
 void ui_nextDiagPage(int8_t delta) {
   s_diagPage = (uint8_t)((s_diagPage + UI_DIAG_PAGES + delta) % UI_DIAG_PAGES);
   ui_wake();
@@ -355,15 +361,15 @@ void ui_tick() {
     curs(0, 18);
     oled.printf("LVL: %3u%%", sensors_levelPct());
 
-    // Row 2 (y=36): flow + current — same columns as the dashboard
+    // Row 2 (y=36): flow + current to 1 decimal — same columns as the dashboard
     curs(0, 36);
-    uint16_t fl = (uint16_t)((sensors_flowLpmX10() + 5) / 10);
-    uint16_t ia = sensors_currentAmps();
-    if (fl > 99) fl = 99;
-    if (ia > 99) ia = 99;
-    oled.printf("FL:%2u", fl);
+    uint16_t fl10 = sensors_flowLpmX10();
+    uint16_t ia10 = sensors_currentAmpsX10();
+    if (fl10 > 999) fl10 = 999;
+    if (ia10 > 999) ia10 = 999;
+    oled.printf("%2u.%uL", fl10 / 10, fl10 % 10);
     curs(68, 36);
-    oled.printf("I:%2u", ia);
+    oled.printf("%2u.%uA", ia10 / 10, ia10 % 10);
 
     // Row 3 (y=54): overflow-run / bypass warnings (font 1)
     oled.setTextSize(1);

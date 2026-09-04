@@ -13,5 +13,6 @@ bool ui_diagMode();        // continuous diagnostic screen (NVS-backed)
 void ui_setDiagMode(bool on);
 void ui_toggleDiagMode();
 uint8_t ui_diagPage();     // 0 = link/system, 1 = live sensors
+void ui_setDiagPage(uint8_t page);
 void ui_nextDiagPage(int8_t delta);
 #endif
