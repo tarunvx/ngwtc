@@ -206,7 +206,9 @@ void sensors_tick() {
     uint32_t ctSum = 0;
     for (uint8_t i = 0; i < CT_AVG_SAMPLES; i++) ctSum += s_ctHist[i];
     s_lastCurrentMv = (uint16_t)(ctSum / CT_AVG_SAMPLES);
-    bool present = s_lastCurrentMv >= settings().ctThreshMv;
+    // Compared in trimmed amps so the threshold the user sets in the menu is
+    // the same number the screen shows.
+    bool present = sensors_currentAmpsX10() >= settings().ctThreshAmpX10;
     if (present != s_currentPresent) {
       s_currentPresent = present;
       Event e{}; e.type = EV_CURRENT_PRESENT; e.p.boolean = present;

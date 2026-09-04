@@ -98,6 +98,7 @@ control everything from the **front panel**, the **on-screen menu**, or
 | **TIMER** | Runs the pump for a fixed time, then stops on its own. Two presets: **Timer 1 (5 min)** and **Timer 2 (10 min)**. |
 | **SLEEP** | Pauses automatic filling entirely — nothing runs on its own. Good for going away or when water supply is off. |
 | **MAINTENANCE** | A safe "parked" state for servicing. The pump won't auto-start. |
+| **MD1** | The pump is started **only** by the physical starter switch. The controller watches the feedback switches, sounds the tank-full alarm, and (unless switched off) presses the OFF stroke for you. It never starts the pump itself. |
 
 You can change modes from the **menu**, the **buttons**, or **remotely**.
 
@@ -455,7 +456,7 @@ back. The common ones:
 | `CMD:1:PUMP:ON` | Start the pump (manual). Add `:TIMER:<minutes>` for a timed run. Wakes from Sleep. |
 | `CMD:1:PUMP:OFF` | Stop the pump. |
 | `CMD:1:PUMP:OVERFLOW` | Arm the one-shot "ignore full" override (§10). `:OFF` disarms it. |
-| `CMD:1:MODE:AUTO` | Switch mode (`AUTO`, `MANUAL`, `TIMER`, `SLEEP`, `MAINT`). |
+| `CMD:1:MODE:AUTO` | Switch mode (`AUTO`, `MANUAL`, `TIMER`, `SLEEP`, `MAINT`, `MD1`). |
 | `CMD:1:GET:STATUS` | Ask for a fresh status report. |
 | `CMD:1:GET:FAULTS` | Re-send the whole stored fault history to the ack feed. |
 | `CMD:1:SYS:RESET_FAULTS` | Clear faults. |
@@ -497,7 +498,7 @@ throttle it. The acknowledgement tells you how many are coming (`FAULTS=7`).
 From the on-screen **menu** (B4) you can change how the system behaves. Settings
 are **saved** and survive power cuts and updates. Highlights:
 
-- **Mode:** AUTO / MANUAL / TIMER, Sleep on/off.
+- **Mode:** AUTO / MANUAL / TIMER / MD1, Sleep on/off.
 - **Smart-Sense:** auto-detect a pump someone started by hand and monitor it.
 - **Ignore Full 1x:** arm the overflow override (§10).
 - **LED: Flt/US:** whether the light bar shows the float steps or the continuous
@@ -506,8 +507,12 @@ are **saved** and survive power cuts and updates. Highlights:
   during setup (use with care — the screen warns while bypassed).
 - **Water levels:** minimum (start) and maximum (stop) percentages.
 - **Pressure calibration:** 0% and 100% points.
-- **Flow threshold:** how much flow counts as "water is moving".
-- **Timings:** pump ON/OFF pulse length, dry-run wait, maximum runtime.
+- **Flow threshold:** how much flow counts as "water is moving" (in L/min).
+- **Timings:** pump ON/OFF pulse length (ms), dry-run wait (seconds), maximum
+  runtime (minutes), timers (seconds).
+- **CT threshold / CT calibration:** both in **amps**, matching the number shown
+  on screen. Set the calibration first so an idle pump reads 0.0 A, then set the
+  threshold above that.
 - **Timer 1 / Timer 2:** the two preset run lengths.
 - **Current threshold:** how much current counts as "motor running".
 - **Show uptime**, **Clear faults**, **Show faults**, **Reset defaults**,

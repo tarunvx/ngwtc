@@ -186,8 +186,8 @@ Example:
 	- (long) = Toggles AUTO/MANUAL mode:
 		-   If in MANUAL_ON, switches to AUTO and stops pump.
 		-   If in IDLE, switches to MANUAL and starts pump (unless in monitor-only mode).
--   **B2**  (short) = If in IDLE, starts Timer 1 (manual ON for timer1Ms duration).
--   **B3**  (short) = If in IDLE, starts Timer 2 (manual ON for timer2Ms duration).
+-   **B2**  (short) = If in IDLE, starts Timer 1 (manual ON for timer1Sec duration).
+-   **B3**  (short) = If in IDLE, starts Timer 2 (manual ON for timer2Sec duration).
 	- (long) = HARD STOP/reset. If pump is running or starting, transitions to STOPPING. If in FAULT_LATCHED or ERROR, clears latched faults.
 -   **B4**  (short) = open menu
 	- (long) = Toggles SLEEP mode (enters SLEEP or returns to IDLE).
@@ -247,11 +247,11 @@ Example:
   "Pressure 100%"
   "Pulse ON (ms)"
   "Pulse OFF (ms)"
-  "Dry-Run (ms)"
-  "Max Runtime (s)"
+  "Dry-Run (s)"
+  "Max Runtime (m)"
   "Timer 1 (s)"
   "Timer 2 (s)"
-  "CT Thresh (mV)"
+  "CT Thresh (A)"
   "Show Uptime"
   "Clear Faults"
   "Show Faults"
@@ -614,7 +614,7 @@ CMD:<id>:<DOMAIN>:<ACTION>[:<arg0>[:<arg1>]]
 
 | CMD:51:SET:PULSE_OFF_MS:1000 | Set OFF pulse width (ms) |
 
-| CMD:52:SET:DRYRUN_MS:18000 | Set dry-run timeout (ms) |
+| CMD:52:SET:dryRunSec:18 | Set dry-run timeout (seconds) |
 
 | CMD:53:SET:CUTOFF_MIN:25 | Set cutoff min % |
 

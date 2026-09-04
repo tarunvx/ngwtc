@@ -12,4 +12,6 @@ bool ui_isDim();           // true while the panel is dimmed
 bool ui_diagMode();        // continuous diagnostic screen (NVS-backed)
 void ui_setDiagMode(bool on);
 void ui_toggleDiagMode();
+uint8_t ui_diagPage();     // 0 = link/system, 1 = live sensors
+void ui_nextDiagPage(int8_t delta);
 #endif

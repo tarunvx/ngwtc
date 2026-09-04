@@ -4,6 +4,11 @@
 #include <Arduino.h>
 #include "config.h"
 
+// NVS blob validity tag. Bump ONLY when the layout or the meaning of a field
+// changes incompatibly — it forces a defaults reload and discards user settings.
+// selftest.cpp checks against this, so never hardcode the literal elsewhere.
+#define SETTINGS_MAGIC  0x5A12
+
 enum Mode : uint8_t {
   MODE_AUTO = 0, MODE_MANUAL = 1, MODE_TIMER = 2, MODE_SLEEP = 3, MODE_MAINTENANCE = 4,
   // MD1: pump is started ONLY by the physical starter. Firmware watches the
@@ -33,7 +38,7 @@ struct Settings {
   // sensor cal
   uint16_t flowKppl;        // pulses per litre (YF-S201 ≈ 450)
   uint16_t ctOffsetMv;
-  uint16_t ctThreshMv;
+  uint16_t ctThreshAmpX10;  // "current present" cutoff, AMPS x10 (matches the display)
   int8_t   ctCalAmps;       // +/- trim applied to the displayed/derived amps
   uint8_t  levelHystPct;
 

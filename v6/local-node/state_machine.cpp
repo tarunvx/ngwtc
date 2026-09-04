@@ -9,6 +9,7 @@
 #include "menu.h"
 #include "ui.h"
 #include "buzzer.h"
+#include "selftest.h"   // ST_FAIL_* bits: only some failures withhold control
 #include "link.h"   // v6: link liveness gates AUTO + forces safe-stop
 
 static SystemState s_state = ST_BOOT_SELFTEST;
@@ -43,6 +44,13 @@ static uint32_t s_overflowArmedAt = 0;
 static bool s_md1Armed     = false;   // a manual run is in progress
 static bool s_md1FullAlarm = false;   // the full alarm is currently sounding
 static bool s_md1PulsedOff = false;   // the auto OFF stroke has been issued once
+
+// Smart-Sense confirmation window for the CURRENT path. An unconnected or noisy
+// CT hovers near the threshold and briefly crosses it, which used to start a
+// phantom "manual run" that then failed with NO_CURRENT and NO_FEEDBACK. The
+// current must stay present for this long before we believe it.
+#define SMART_CURRENT_CONFIRM_MS 5000UL
+static uint32_t s_smartCurrentSince = 0;
 
 // Fault repeat counter
 struct RepeatCtr { uint32_t firstAt; uint8_t count; FaultCode last; };
@@ -115,7 +123,9 @@ static bool canStartPump() {
 }
 
 void sm_clearLatched() {
-  if (s_state == ST_FAULT_LATCHED || s_state == ST_ERROR) {
+  // MAINTENANCE is included deliberately: a self-test failure used to be a dead
+  // end that neither a fault clear nor a reboot could escape.
+  if (s_state == ST_FAULT_LATCHED || s_state == ST_ERROR || s_state == ST_MAINTENANCE) {
     s_state = ST_IDLE; s_enteredAt = millis();
     Serial.printf("%s cleared → IDLE\n", LOG_TAG_SM);
   }
@@ -227,7 +237,12 @@ void sm_handleEvent(const Event& e) {
         char buf[24];
         snprintf(buf, sizeof(buf), "SELFTEST 0x%02X", (unsigned)e.p.u32);
         ui_showPopup(buf, 6000);
-        enterState(ST_MAINTENANCE);
+        // Only a stuck feedback switch is dangerous enough to withhold control:
+        // it means the machine cannot tell whether the pump is running. Anything
+        // else is reported and we continue, because MAINTENANCE lights all nine
+        // NeoPixels and blocks every operation — too harsh for a bad NVS tag.
+        if (e.p.u32 & ST_FAIL_FB_STUCK) enterState(ST_MAINTENANCE);
+        else                            enterState(settings().sleepMode ? ST_SLEEP : ST_IDLE);
       }
       return;
 
@@ -265,6 +280,13 @@ void sm_handleEvent(const Event& e) {
         return;
       }
 
+      // Diagnostic screen: B2/B3 page between system and live-sensor views.
+      if (ui_diagMode() && e.p.btn.kind == PRESS_SHORT &&
+          (e.p.btn.id == BTN2 || e.p.btn.id == BTN3)) {
+        ui_nextDiagPage(e.p.btn.id == BTN3 ? +1 : -1);
+        return;
+      }
+
       // Operating screen toggle: B1 short while pump running toggles home/op view
       if (e.p.btn.id == BTN1 && e.p.btn.kind == PRESS_SHORT && ui_isOpScreen()) {
         ui_toggleOpScreen();
@@ -281,7 +303,8 @@ void sm_handleEvent(const Event& e) {
         // HARD STOP / reset
         if (sm_isPumpRunningState(s_state) || s_state == ST_STARTING) {
           enterState(ST_STOPPING);
-        } else if (s_state == ST_FAULT_LATCHED || s_state == ST_ERROR) {
+        } else if (s_state == ST_FAULT_LATCHED || s_state == ST_ERROR
+                   || s_state == ST_MAINTENANCE) {
           sm_clearLatched();
         }
       } else if (e.p.btn.id == BTN4 && e.p.btn.kind == PRESS_LONG) {
@@ -379,7 +402,8 @@ void sm_handleEvent(const Event& e) {
         return;
       }
       // Smart-Sense: feedback switch pressed externally while IDLE
-      if (s_state == ST_IDLE && e.p.boolean && settings().smartSense && !settings().bypassFeedback) {
+      if (s_state == ST_IDLE && e.p.boolean && settings().mode != MODE_MD1
+          && settings().smartSense && !settings().bypassFeedback) {
         Serial.printf("%s SMART-SENSE: feedback detected, entering monitoring\n", LOG_TAG_SM);
         enterState(ST_MANUAL_ON);  // enter running state for monitoring
         s_pumpStartedAt = millis(); // anchor runtime/max-runtime to NOW (not boot)
@@ -414,12 +438,16 @@ void sm_handleEvent(const Event& e) {
           enterState(ST_STOPPING);
         }
       }
-      // Smart-Sense: current detected externally while IDLE
-      else if (s_state == ST_IDLE && e.p.boolean && settings().smartSense && !settings().bypassCurrentSense) {
-        Serial.printf("%s SMART-SENSE: current detected, entering monitoring\n", LOG_TAG_SM);
-        enterState(ST_MANUAL_ON);
-        s_pumpStartedAt = millis();
-        ui_requestUpdate();
+      // Smart-Sense: current detected externally while IDLE. Only a rising edge
+      // is recorded here; sm_tick() applies the confirmation window. MD1 is
+      // excluded — it starts runs from the feedback switch alone.
+      else if (s_state == ST_IDLE && settings().mode != MODE_MD1
+               && settings().smartSense && !settings().bypassCurrentSense) {
+        if (e.p.boolean) {
+          if (!s_smartCurrentSince) s_smartCurrentSince = millis();
+        } else {
+          s_smartCurrentSince = 0;
+        }
       }
       return;
 
@@ -428,6 +456,7 @@ void sm_handleEvent(const Event& e) {
       else if (s_state == ST_STOPPING && e.p.flow.lpm_x10 < sensors_flowThreshX10()) s_sawFlow = true;
       // Smart-Sense: flow detected externally while IDLE
       else if (s_state == ST_IDLE && e.p.flow.lpm_x10 >= sensors_flowThreshX10()
+               && settings().mode != MODE_MD1
                && settings().smartSense && !settings().bypassFlowSense) {
         Serial.printf("%s SMART-SENSE: flow detected (%u x0.1 lpm), entering monitoring\n",
           LOG_TAG_SM, e.p.flow.lpm_x10);
@@ -473,6 +502,21 @@ void sm_tick() {
 
     case ST_IDLE: {
       if (settings().sleepMode) { enterState(ST_SLEEP); break; }
+
+      // Smart-Sense current path: only believe it after the confirmation
+      // window, and only if the current is STILL present now.
+      if (s_smartCurrentSince && settings().mode != MODE_MD1) {
+        if (!sensors_currentPresent()) {
+          s_smartCurrentSince = 0;
+        } else if (sinceMs(s_smartCurrentSince) >= SMART_CURRENT_CONFIRM_MS) {
+          s_smartCurrentSince = 0;
+          Serial.printf("%s SMART-SENSE: current sustained, entering monitoring\n", LOG_TAG_SM);
+          enterState(ST_MANUAL_ON);
+          s_pumpStartedAt = millis();
+          ui_requestUpdate();
+          break;
+        }
+      }
 #if !MONITOR_ONLY_MODE
       // v6: only auto-fill when the tank node link is live (canStartPump()).
       if (settings().mode == MODE_AUTO && link_alive() && sensors_levelPct() < 25) {

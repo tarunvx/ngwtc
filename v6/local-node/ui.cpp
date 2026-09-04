@@ -54,6 +54,19 @@ void ui_setDiagMode(bool on) {
 
 void ui_toggleDiagMode() { ui_setDiagMode(!settings().diagMode); }
 
+// Page is RAM-only: which page you were last looking at is not worth an NVS
+// write, and page 0 is the sensible default after a reboot.
+#define UI_DIAG_PAGES 2
+static uint8_t s_diagPage = 0;
+
+uint8_t ui_diagPage() { return s_diagPage; }
+
+void ui_nextDiagPage(int8_t delta) {
+  s_diagPage = (uint8_t)((s_diagPage + UI_DIAG_PAGES + delta) % UI_DIAG_PAGES);
+  ui_wake();
+  ui_requestUpdate();
+}
+
 void ui_wake() {
   s_lastActivity = millis();
   if (s_dim) {
@@ -244,6 +257,41 @@ void ui_tick() {
   if (settings().diagMode) {
     oled.setTextSize(1);
     oled.setTextColor(WHITE);
+
+    if (s_diagPage == 1) {
+      // ---- Page 2: live sensor readout (manual test) ----
+      oled.setCursor(0, 0);
+      oled.printf("SENSORS   B2/B3");
+      drawLink(108, 0, link_alive());
+
+      oled.setCursor(0, 10);
+      oled.printf("FB-ON:%u  FB-OFF:%u",
+                  sensors_fbOn() ? 1u : 0u, sensors_fbOff() ? 1u : 0u);
+
+      uint16_t fl10 = sensors_flowLpmX10();
+      oled.setCursor(0, 20);
+      oled.printf("FL:%u.%u L  CT:%u.%uA",
+                  fl10 / 10, fl10 % 10,
+                  sensors_currentAmpsX10() / 10, sensors_currentAmpsX10() % 10);
+
+      oled.setCursor(0, 30);
+      oled.printf("LVL:%3u%%  US:%3u%%",
+                  sensors_levelPct(), sensors_ultrasonicLevelPct());
+
+      oled.setCursor(0, 40);
+      oled.printf("D:%umm  %s", (unsigned)sensors_distanceMm(),
+                  sensors_levelPlausible() ? "PLAUS" : "IMPL!");
+
+      int16_t tc = sensors_tempCx10();
+      oled.setCursor(0, 50);
+      if (tc > -9990) oled.printf("DHT %d.%dC %u%%  i%umV",
+                                  tc / 10, abs(tc % 10), sensors_rhX10() / 10,
+                                  (unsigned)sensors_currentMv());
+      else            oled.printf("DHT --      i%umV", (unsigned)sensors_currentMv());
+
+      oled.display();
+      return;
+    }
 
     oled.setCursor(0, 0);
     oled.printf("DIAG up%lus", (unsigned long)(millis() / 1000));

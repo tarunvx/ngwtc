@@ -8,14 +8,89 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.4.0** (`esp-32-dev/`) · **v7.0.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
+Current: **v5.4.0** (`esp-32-dev/`) · **v6.14.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
 
-> **v5 (`esp-32-dev/`) has NOT been updated to 7.0.0 and now diverges.** The MD1
-> mode, unit re-basing, CT trim and silent flags are v6-only. Sync before doing
-> any further v5 work.
+> **v5 (`esp-32-dev/`) has NOT been updated past 5.4.0 and now diverges.** MD1,
+> the unit re-basing, CT trim and silent flags are v6-only.
 
 ---
-# Version 7.0.0 — v6/local-node
+# Version 6.14.0 — v6/local-node
+## Self-test lockout fix, CT threshold in amps, sensor page, menu rework
+
+> Renumbered from 7.0.0. MAJOR is reserved for a hardware/architecture
+> generation change; an NVS break is signalled by `SETTINGS_MAGIC`, not the
+> firmware version. The rule in the instructions file was corrected to match.
+
+### Fixed — stuck in MAINTENANCE, self-test 0x10 every boot
+
+`selftest.cpp` compared `settings().magic` against a **hardcoded `0x5A11`** while
+the layout change had moved `MAGIC` to `0x5A12`. The NVS check therefore failed
+on every boot → `SELFTEST_FAIL` → `ST_MAINTENANCE`, which nothing could clear.
+
+Three changes so this class of bug cannot recur:
+
+- `SETTINGS_MAGIC` now lives in `settings.h` and both `settings.cpp` and
+  `selftest.cpp` use it. **The literal must never be written twice.**
+- **Only `ST_FAIL_FB_STUCK` now forces `ST_MAINTENANCE`.** A stuck feedback
+  switch means the machine cannot tell whether the pump is running, which does
+  justify withholding control. A bad NVS tag or an odd CT bias does not — those
+  are reported via popup and boot continues. `ST_FAIL_*` moved to `selftest.h`.
+- `sm_clearLatched()` and B3-long now clear `ST_MAINTENANCE` too. It was a dead
+  end that survived reboots because the failing check was deterministic.
+
+### Fixed — phantom pump starts (NO_CURRENT / NO_FEEDBACK / OVERRUN loop)
+
+Field logs showed repeated `NO_CURRENT` in `MANUAL_ON` followed ~2 s later by
+`NO_FEEDBACK` in `STOPPING`. Cause: the CT reads 0–2 A of noise with no clamp
+connected, which occasionally crossed the 80 mV threshold. That fired
+`EV_CURRENT_PRESENT(true)` → Smart-Sense started a phantom "manual run" → the
+noise dropped below threshold → `NO_CURRENT` → `STOPPING` → no feedback →
+`NO_FEEDBACK`. `OVERRUN` appeared when a phantom run outlived `maxRuntime`.
+
+- Smart-Sense's current path now requires the current to be **continuously
+  present for `SMART_CURRENT_CONFIRM_MS` (5 s)** and still present at the moment
+  it fires. A momentary noise spike can no longer start a run.
+- **MD1 is excluded from all three generic Smart-Sense paths** (current, flow,
+  feedback). In MD1 the feedback switch alone drives the run, so the generic
+  paths were a second, conflicting trigger — which is why a feedback-OFF press
+  could put the system into operating mode.
+
+### Changed — CT threshold is now in amps
+
+`ctThreshMv` (mV) → **`ctThreshAmpX10`** (amps ×10, default 30 = 3.0 A), compared
+against `sensors_currentAmpsX10()`. The menu value and the screen reading are now
+the same number, including the `ctCalAmps` trim — previously you tuned in
+millivolts while reading amps.
+
+### Added — live sensor page (manual test)
+
+The diagnostic screen gained a second page, toggled with **B2/B3** while diag
+mode is on. RAM-only page index, so no new NVS field:
+
+```
+SENSORS   B2/B3
+FB-ON:0  FB-OFF:1
+FL:3.1 L  CT:12.4A
+LVL: 75%  US: 77%
+D:296mm  PLAUS
+DHT 29.4C 61%  i412mV
+```
+
+### Changed — menu grouped and position remembered
+
+Reordered into MODE → run behaviour → alarm → timings → levels → sensor
+calibration → display → bring-up bypasses → info/danger.
+
+- **Committing a value no longer closes the menu**, so a follow-up edit is one
+  click away.
+- The cursor position is remembered for **15 s** after closing, then resets to
+  the top. Changing two adjacent settings previously meant scrolling the whole
+  list twice.
+- Stale unit labels corrected: `Dry-Run (s)`, `Max Runtime (m)`,
+  `CT Thresh (A)`, `Flow Thr (L/m)`.
+
+---
+# Version 7.0.0 (renumbered to 6.14.0) — v6/local-node
 ## MD1 mode, user-facing units, CT trim, silent mode — **breaks NVS**
 
 MAJOR because the NVS layout changed incompatibly. `MAGIC` is bumped

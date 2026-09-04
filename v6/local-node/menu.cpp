@@ -15,38 +15,51 @@
 // ============================================================
 
 // --- Menu items ---
+// Grouped by purpose, most-used first: MODE, then run/alarm behaviour, then
+// display, then calibration, then bring-up bypasses, then info/danger. Items
+// within a group stay adjacent so the list is navigable without reading every
+// label. kLabels[] is index-aligned with this enum — keep them in step.
 enum MenuItem : uint8_t {
+  // -- Mode --
   MI_MODE_AUTO = 0,
   MI_MODE_MANUAL,
   MI_MODE_TIMER,
   MI_MODE_MD1,
   MI_SLEEP_TOGGLE,
-  MI_SMART_SENSE,
+  // -- Run behaviour --
   MI_OVERFLOW_ONCE,
-  MI_LED_SOURCE,
-  MI_DIAG_MODE,
-  MI_SILENT_MODE,
+  MI_SMART_SENSE,
   MI_IGNORE_ACTUATION,
+  // -- Alarm / buzzer --
+  MI_SILENT_MODE,
   MI_SILENT_ON_OFFFB,
+  // -- Timings --
+  MI_SET_TIMER1,
+  MI_SET_TIMER2,
+  MI_SET_MAX_RUNTIME,
+  MI_SET_DRYRUN,
+  MI_SET_PULSE_ON,
+  MI_SET_PULSE_OFF,
+  // -- Levels --
+  MI_SET_CUTOFF_MIN,
+  MI_SET_CUTOFF_MAX,
+  // -- Sensor calibration --
+  MI_SET_CT_THRESH,
+  MI_SET_CT_CAL,
+  MI_SET_FLOW_THRESH,
+  // -- Display --
+  MI_DIAG_MODE,
+  MI_LED_SOURCE,
+  MI_SET_LED_ALT,
+  MI_SET_UI_DIM,
+  // -- Bring-up bypasses --
   MI_BYPASS_CURRENT,
   MI_BYPASS_FLOW,
   MI_BYPASS_FEEDBACK,
-  MI_SET_CUTOFF_MIN,
-  MI_SET_CUTOFF_MAX,
-  MI_SET_LED_ALT,
-  MI_SET_UI_DIM,
-  MI_SET_FLOW_THRESH,
-  MI_SET_PULSE_ON,
-  MI_SET_PULSE_OFF,
-  MI_SET_DRYRUN,
-  MI_SET_MAX_RUNTIME,
-  MI_SET_TIMER1,
-  MI_SET_TIMER2,
-  MI_SET_CT_THRESH,
-  MI_SET_CT_CAL,
+  // -- Info / danger --
   MI_SHOW_UPTIME,
-  MI_RESET_FAULTS,
   MI_SHOW_FAULTS,
+  MI_RESET_FAULTS,
   MI_DEFAULTS,
   MI_REBOOT,
   MI_EXIT,
@@ -59,32 +72,40 @@ static const char* kLabels[MI_COUNT] = {
   "Mode: TIMER",
   "Mode: MD1",
   "Toggle SLEEP",
-  "Smart-Sense",
+
   "Ignore Full 1x",
-  "LED: Flt/US",
-  "Diagnostics",
-  "Silent Mode",
+  "Smart-Sense",
   "MD1: No Actuate",
+
+  "Silent Mode",
   "MD1: Stop on FB",
+
+  "Timer 1 (s)",
+  "Timer 2 (s)",
+  "Max Runtime (m)",
+  "Dry-Run (s)",
+  "Pulse ON (ms)",
+  "Pulse OFF (ms)",
+
+  "MIN Water Level",
+  "MAX Water Level",
+
+  "CT Thresh (A)",
+  "CT Calib (A)",
+  "Flow Thr (L/m)",
+
+  "Diagnostics",
+  "LED: Flt/US",
+  "LED Alt (ms)",
+  "Screen Dim (s)",
+
   "Bypass I-Sense",
   "Bypass Flow",
   "Bypass Feedback",
-  "MIN Water Level",
-  "MAX Water Level",
-  "LED Alt (ms)",
-  "Screen Dim (s)",
-  "Flow Threshold",
-  "Pulse ON (ms)",
-  "Pulse OFF (ms)",
-  "Dry-Run (ms)",
-  "Max Runtime (s)",
-  "Timer 1 (s)",
-  "Timer 2 (s)",
-  "CT Thresh (mV)",
-  "CT Calib (A)",
+
   "Show Uptime",
-  "Clear Faults",
   "Show Faults",
+  "Clear Faults",
   "Reset Defaults",
   "Reboot",
   "Exit",
@@ -93,6 +114,19 @@ static const char* kLabels[MI_COUNT] = {
 // --- State ---
 static bool    s_open = false;
 static uint8_t s_sel  = 0;
+// Reopening the menu used to dump you back at item 0, so changing two adjacent
+// settings meant scrolling the whole list twice. The position is remembered for
+// a short while — long enough for a follow-up edit, short enough that coming
+// back later starts from the top.
+#define MENU_SEL_MEMORY_MS 15000UL
+static uint8_t  s_lastSel   = 0;
+static uint32_t s_lastSelAt = 0;
+
+static void menuClose() {
+  s_open      = false;
+  s_lastSel   = s_sel;
+  s_lastSelAt = millis();
+}
 
 // --- Value editor state ---
 static bool    s_editing = false;
@@ -154,7 +188,7 @@ static void commitMaxRun(int32_t v)    { settings_setU16("maxRuntimeMin", (uint1
 static void commitTimer1(int32_t v)    { settings_setU16("timer1Sec",     (uint16_t)v); }
 static void commitTimer2(int32_t v)    { settings_setU16("timer2Sec",     (uint16_t)v); }
 static void commitCtCal(int32_t v)     { settings_setU8 ("ctCalAmps", (uint8_t)(int8_t)v); }
-static void commitCtThresh(int32_t v)  { settings_setU16("ctThreshMv", (uint16_t)v); }
+static void commitCtThresh(int32_t v)  { settings_setU16("ctThreshAmpX10", (uint16_t)v); }
 
 // --- Activate menu item ---
 static void activate() {
@@ -293,7 +327,7 @@ static void activate() {
       startEdit("Timer 2", "s", settings().timer2Sec, 30, 3600, 30, commitTimer2);
       return;
     case MI_SET_CT_THRESH:
-      startEdit("CT Threshold", "mV", settings().ctThreshMv, 10, 500, 10, commitCtThresh);
+      startEdit("CT Threshold", "A", settings().ctThreshAmpX10, 5, 400, 2, commitCtThresh, true);
       return;
     case MI_SET_CT_CAL:
       startEdit("CT Calib", "A", settings().ctCalAmps, -20, 20, 1, commitCtCal);
@@ -348,12 +382,19 @@ void menu_handleButton(ButtonId id, PressKind k) {
         break;
       case BTN4: { // confirm
         if (s_commitFn) s_commitFn(s_editVal);
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%s set: %ld%s", s_editTitle, (long)s_editVal, s_editUnit);
+        char buf[36];
+        if (s_editDecimal) {
+          long v = (long)s_editVal;
+          snprintf(buf, sizeof(buf), "%s: %ld.%ld%s", s_editTitle,
+                   v / 10, v < 0 ? -(v % 10) : (v % 10), s_editUnit);
+        } else {
+          snprintf(buf, sizeof(buf), "%s: %ld%s", s_editTitle, (long)s_editVal, s_editUnit);
+        }
         s_editing = false;
-        s_open = false;
-        ui_showPopup(buf, 2000);
+        // Stay in the menu so the next setting is one click away.
+        ui_showPopup(buf, 1500);
         Serial.printf("[MENU] %s\n", buf);
+        ui_requestUpdate();
         return;
       }
       case BTN1: // cancel
@@ -368,8 +409,10 @@ void menu_handleButton(ButtonId id, PressKind k) {
   // --- Open menu ---
   if (!s_open) {
     if (id == BTN4 && k == PRESS_SHORT) {
-      s_open = true; s_sel = 0;
-      Serial.println("[MENU] opened");
+      s_open = true;
+      s_sel  = (s_lastSelAt && (millis() - s_lastSelAt) < MENU_SEL_MEMORY_MS)
+                 ? s_lastSel : 0;
+      Serial.printf("[MENU] opened at %u\n", s_sel);
       ui_requestUpdate();
     }
     return;
@@ -379,7 +422,7 @@ void menu_handleButton(ButtonId id, PressKind k) {
   if (k == PRESS_SHORT) {
     switch (id) {
       case BTN1:
-        s_open = false;
+        menuClose();
         Serial.println("[MENU] back/close");
         break;
       case BTN3:
@@ -394,7 +437,7 @@ void menu_handleButton(ButtonId id, PressKind k) {
     }
   } else { // PRESS_LONG
     if (id == BTN1 || id == BTN4) {
-      s_open = false;
+      menuClose();
       Serial.println("[MENU] closed (long)");
     }
   }

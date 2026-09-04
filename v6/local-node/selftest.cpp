@@ -4,13 +4,6 @@
 #include "settings.h"
 #include "link.h"
 
-// Failure bits
-#define ST_FAIL_FLOAT_PLAUS  (1U << 0)   // (v6: repurposed — reserved, no longer local)
-#define ST_FAIL_FLOW_PIN     (1U << 1)   // (v6: repurposed — reserved, no longer local)
-#define ST_FAIL_CT_BIAS      (1U << 2)
-#define ST_FAIL_FB_STUCK     (1U << 3)
-#define ST_FAIL_NVS          (1U << 4)
-
 uint32_t selftest_run() {
   uint32_t fail = 0;
 
@@ -38,7 +31,7 @@ uint32_t selftest_run() {
   if (digitalRead(PIN_FB_ON)  == LOW && digitalRead(PIN_FB_OFF) == LOW) fail |= ST_FAIL_FB_STUCK;
 
   // NVS already validated in settings_init; if magic mismatched, settings would have rewritten.
-  if (settings().magic != 0x5A11) fail |= ST_FAIL_NVS;
+  if (settings().magic != SETTINGS_MAGIC) fail |= ST_FAIL_NVS;
 
   Serial.printf("[SELFTEST] result=0x%08X (v6: floats/flow remote)\n", fail);
   if (!link_everReceived()) {

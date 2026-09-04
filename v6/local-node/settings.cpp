@@ -3,10 +3,7 @@
 #include <Preferences.h>
 
 #define NVS_NS  "swtc"
-// 0x5A12: units of dryRun/maxRuntime/timer1/timer2 changed and new flags were
-// added. Bumping this forces a clean defaults load — the old blob's values
-// would be catastrophically misread under the new units.
-#define MAGIC   0x5A12
+#define MAGIC   SETTINGS_MAGIC
 
 static Settings s_cfg;
 static Preferences s_prefs;
@@ -26,7 +23,7 @@ static void loadDefaults() {
   s_cfg.timer2Sec       = DEF_TIMER2_SEC;
   s_cfg.flowKppl        = DEF_FLOW_KPPL;
   s_cfg.ctOffsetMv      = DEF_CT_OFFSET_MV;
-  s_cfg.ctThreshMv      = DEF_CT_THRESH_MV;
+  s_cfg.ctThreshAmpX10  = DEF_CT_THRESH_AMP_X10;
   s_cfg.ctCalAmps       = DEF_CT_CAL_AMPS;
   s_cfg.levelHystPct    = DEF_LEVEL_HYST;
   s_cfg.mode            = MODE_AUTO;
@@ -106,7 +103,7 @@ bool settings_setU16(const char* k, uint16_t v) {
   bool ok =
        _matchU16(k, "flowKppl",   s_cfg.flowKppl,   v)
     || _matchU16(k, "ctOffsetMv", s_cfg.ctOffsetMv, v)
-    || _matchU16(k, "ctThreshMv", s_cfg.ctThreshMv, v)
+    || _matchU16(k, "ctThreshAmpX10", s_cfg.ctThreshAmpX10, v)
     || _matchU16(k, "ledAltMs", s_cfg.ledAltMs, v)
     || _matchU16(k, "uiDimMs",  s_cfg.uiDimMs,  v)
     || _matchU16(k, "dryRunSec",     s_cfg.dryRunSec,     v)
