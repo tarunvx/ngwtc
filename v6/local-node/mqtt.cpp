@@ -33,6 +33,8 @@
 
 static uint32_t s_faultPubSeq  = 0;   // faultlog_seq() value already published
 static int32_t  s_faultReplay  = -1;  // >= 0 while streaming the log for GET:FAULTS
+static uint32_t s_tracePubSeq   = 0;
+static int32_t  s_tracePubReplay = -1;
 static uint32_t s_lastFaultPub = 0;
 
 // ---------------- CMD parser ----------------
@@ -152,6 +154,14 @@ bool mqtt_dispatchCmd(const char* line) {
       return true;
     }
     if (strcmp(act, "STATUS") == 0) { mqtt_publishStatus(); mqtt_publishAck(id, true, "OK"); return true; }
+    if (strcmp(act, "TRACE") == 0) {
+      size_t cnt = sm_traceCount();
+      s_tracePubReplay = cnt ? 0 : -1;
+      char tmp[48];
+      snprintf(tmp, sizeof(tmp), "TRACES=%u", (unsigned)cnt);
+      mqtt_publishAck(id, true, tmp);
+      return true;
+    }
     if (strcmp(act, "DIAG") == 0) {
       char tmp[140];
       snprintf(tmp, sizeof(tmp), "fw=%s rst=%s heap=%lu min=%lu up=%lus sup=%lu bc=%s rx=%lu tu=%lus",
@@ -308,6 +318,53 @@ static void faultPubTick() {
   if (faultlog_get(cnt - behind, e)) publishFault(e, (uint32_t)(cnt - behind) + 1, false);
   s_faultPubSeq = seq - behind + 1;
 }
+
+static void publishTrace(const StateTrace& t, uint32_t idx, bool replay) {
+  char json[240];
+  snprintf(json, sizeof(json),
+    "TRACE:{\"n\":%lu,\"rp\":%u,\"ts\":%lu,\"w\":\"%s\",\"fr\":\"%s\",\"to\":\"%s\","
+    "\"md\":\"%s\",\"lvl\":%u,\"fl\":%u,\"i\":%u,\"ia\":%u,"
+    "\"fb1\":%u,\"fb0\":%u,\"cp\":%u,\"lk\":%u,\"bi\":%u,\"bf\":%u,\"bfb\":%u,\"ss\":%u}",
+    (unsigned long)idx, replay ? 1u : 0u, (unsigned long)t.ts,
+    sm_reasonName(t.reason), sm_stateName((SystemState)t.from),
+    sm_stateName((SystemState)t.to), modeName(t.mode),
+    t.levelPct, t.flowX10, t.currentMv, t.ampsX10,
+    (t.flags & SMTF_FB_ON)    ? 1u : 0u,
+    (t.flags & SMTF_FB_OFF)   ? 1u : 0u,
+    (t.flags & SMTF_CUR_PRES) ? 1u : 0u,
+    (t.flags & SMTF_LINK_OK)  ? 1u : 0u,
+    (t.flags & SMTF_BYP_I)    ? 1u : 0u,
+    (t.flags & SMTF_BYP_FLOW) ? 1u : 0u,
+    (t.flags & SMTF_BYP_FB)   ? 1u : 0u,
+    (t.flags & SMTF_SMART)    ? 1u : 0u);
+  Serial.printf("%s %s\n", LOG_TAG_MQ, json);
+  if (s_mqtt.connected()) s_pubAck.publish(json);
+  s_lastFaultPub = millis();
+}
+
+// Traces share the fault feed's pacing so a burst of transitions cannot flood
+// the broker.
+static void tracePubTick() {
+  if (!elapsed(s_lastFaultPub, FAULT_PUB_GAP_MS)) return;
+  size_t cnt = sm_traceCount();
+  StateTrace t;
+
+  if (s_tracePubReplay >= 0) {
+    if ((size_t)s_tracePubReplay >= cnt) { s_tracePubReplay = -1; return; }
+    if (sm_traceGet((size_t)s_tracePubReplay, t)) publishTrace(t, (uint32_t)s_tracePubReplay + 1, true);
+    if ((size_t)++s_tracePubReplay >= cnt) s_tracePubReplay = -1;
+    return;
+  }
+
+  uint32_t seq = sm_traceSeq();
+  if (seq < s_tracePubSeq) s_tracePubSeq = seq;
+  if (seq == s_tracePubSeq || cnt == 0) return;
+
+  uint32_t behind = seq - s_tracePubSeq;
+  if (behind > cnt) behind = cnt;
+  if (sm_traceGet(cnt - behind, t)) publishTrace(t, (uint32_t)(cnt - behind) + 1, false);
+  s_tracePubSeq = seq - behind + 1;
+}
 #endif
 
 void mqtt_tick() {
@@ -332,5 +389,7 @@ void mqtt_tick() {
   static uint32_t lastPub = 0;
   if (elapsed(lastPub, MQTT_PUBLISH_PERIOD_MS)) { lastPub = millis(); mqtt_publishStatus(); }
   faultPubTick();
+  tracePubTick();
+  tracePubTick();
 #endif
 }

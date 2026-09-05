@@ -8,10 +8,50 @@ Versions are tracked per tree via `FIRMWARE_VERSION` (`config.h` for `esp-32-dev
 and `v6/local-node/`, `tank-node.ino` for `v6/tank-node/`). MINOR is bumped on
 every change; MAJOR only for a redesign.
 
-Current: **v5.4.0** (`esp-32-dev/`) · **v6.15.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
+Current: **v5.4.0** (`esp-32-dev/`) · **v6.16.0** (`v6/local-node/`) · **v6.8.0** (`v6/tank-node/`)
 
 > **v5 (`esp-32-dev/`) has NOT been updated past 5.4.0 and now diverges.** MD1,
 > the unit re-basing, CT trim and silent flags are v6-only.
+
+---
+# Version 6.16.0 — v6/local-node
+## State-transition trace: every state change records why, and what the inputs were
+
+Repeated unexplained entries into `MANUAL_ON` could not be diagnosed after the
+fact. The status feed shows the *result* (`st:MANUAL_ON`) 30 seconds later, by
+which time the triggering input has gone. Guessing from `ia:0`/`fl:0` was
+inconclusive because those are sampled at publish time, not at the transition.
+
+### Added
+
+Every `enterState()` now records a `StateTrace`: the **reason**, the from/to
+states, and a snapshot of **every input the decision could have depended on** —
+feedback ON/OFF, current present, mV and trimmed amps, flow, level, link
+liveness, all three bypass flags and `smartSense`.
+
+31 reason codes cover each path that can change state: `BTN_MANUAL`,
+`BTN_TIMER1/2`, `BTN_STOP`, `SMART_FB`, `SMART_CUR`, `SMART_FLOW`, `MD1_FB_ON`,
+`MD1_FB_OFF`, `AUTO_LEVEL`, `START_OK`, `LEVEL_FULL`, `MAXRUN`, `FAULT`,
+`PANIC`, `LINK_DOWN`, and so on.
+
+Emitted three ways:
+
+- **Serial**, immediately, one line per transition.
+- **MQTT** as `TRACE:{...}` on the ack feed, paced by `FAULT_PUB_GAP_MS`.
+- **`CMD:n:GET:TRACE`** replays the 16-entry RAM ring.
+
+```
+TRACE:{"n":4,"rp":0,"ts":91234,"w":"SMART_CUR","fr":"IDLE","to":"MANUAL_ON",
+"md":"MANUAL","lvl":25,"fl":0,"i":61,"ia":0,
+"fb1":0,"fb0":1,"cp":0,"lk":1,"bi":0,"bf":0,"bfb":1,"ss":1}
+```
+
+`w` is the answer to "what started it". `bfb` and `ss` are included precisely
+because they are **not** in the status JSON, so a misconfigured bypass or
+Smart-Sense flag was previously invisible.
+
+Untagged call sites record `TR_UNKNOWN` rather than failing to compile — an
+unexplained trace is still more useful than none, and names the site to tag.
 
 ---
 # Version 6.15.0 — v6/local-node

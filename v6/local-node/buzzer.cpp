@@ -12,15 +12,14 @@ static uint32_t    s_chirpUntil = 0;   // one-shot confirmation chirp deadline
 
 // Buzzer hardware: a PASSIVE buzzer (no internal oscillator) on G23. It needs an
 // AC/square-wave drive to make sound, so we use the ESP32 LEDC peripheral: a
-// 2 kHz carrier at 50% duty (128/255) = a clean tone; duty 0 = silent. (Tested
-// good on this module.) Pattern durations/duty in buzzer_tick() are unchanged —
-// each "on" just switches the LEDC duty to the tone instead of a bare HIGH.
+// 2 kHz carrier at 50% duty (128/255) = a clean tone; duty 255 = silent (low-level triggered).
 #define BUZZER_FREQ_HZ  2000   // tone carrier frequency
 #define BUZZER_RES_BITS 8      // LEDC resolution (duty 0..255)
 #define BUZZER_DUTY_ON  128    // 50% square wave = clean tone
+#define BUZZER_DUTY_OFF 255    // 100% HIGH = turns off the low-level triggered transistor
 #define BUZZER_LEDC_CH  0      // (Arduino-ESP32 core 2.x channel API only)
 
-// Low-level LEDC duty write (0 = silent, 128 = tone). Auto-selects the core-3.x
+// Low-level LEDC duty write (255 = silent, 128 = tone). Auto-selects the core-3.x
 // pin API or the core-2.x channel API.
 static void buzzWrite(uint16_t duty) {
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -37,14 +36,14 @@ void buzzer_init() {
   ledcSetup(BUZZER_LEDC_CH, BUZZER_FREQ_HZ, BUZZER_RES_BITS);
   ledcAttachPin(PIN_BUZZER, BUZZER_LEDC_CH);
 #endif
-  buzzWrite(0);   // silent at boot
+  buzzWrite(BUZZER_DUTY_OFF);   // silent at boot
 }
 
 void buzzer_set(BuzzPattern p) {
   if (p != s_pat) { s_pat = p; s_t0 = millis(); s_silenced = false; }
 }
 
-void buzzer_silence() { s_silenced = true; buzzWrite(0); }
+void buzzer_silence() { s_silenced = true; buzzWrite(BUZZER_DUTY_OFF); }
 
 // One-shot confirmation blip. Overrides the pattern engine (and a silence) for
 // `ms`, then normal pattern output resumes. Used for button-ack feedback.
@@ -55,10 +54,10 @@ void buzzer_chirp(uint16_t ms) { s_chirpUntil = millis() + ms; }
 void buzzer_beep(uint16_t onMs) {
   buzzWrite(BUZZER_DUTY_ON);
   delay(onMs);
-  buzzWrite(0);
+  buzzWrite(BUZZER_DUTY_OFF);
 }
 
-static void out(bool on) { buzzWrite((on && !s_silenced) ? BUZZER_DUTY_ON : 0); }
+static void out(bool on) { buzzWrite((on && !s_silenced) ? BUZZER_DUTY_ON : BUZZER_DUTY_OFF); }
 
 void buzzer_tick() {
   // One-shot confirmation chirp takes priority over the pattern engine (and a

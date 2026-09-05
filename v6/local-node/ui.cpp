@@ -417,7 +417,7 @@ void ui_tick() {
   if (fl10 > 999) fl10 = 999;
   if (ia10 > 999) ia10 = 999;
   oled.printf("%2u.%uL", fl10 / 10, fl10 % 10);
-  curs(68, 32);
+  curs(60, 32);
   oled.printf("%2u.%uA", ia10 / 10, ia10 % 10);
 
   // Row 4 (y=48): temp + humidity (font 1 to fit both)

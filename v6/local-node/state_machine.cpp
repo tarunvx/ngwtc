@@ -131,8 +131,76 @@ void sm_clearLatched() {
   }
 }
 
-static void enterState(SystemState ns) {
+// ---- Transition trace ----------------------------------------------------
+#define SM_TRACE_SIZE 16
+static StateTrace s_trace[SM_TRACE_SIZE];
+static uint8_t    s_traceHead = 0;
+static uint8_t    s_traceCount = 0;
+static uint32_t   s_traceSeq = 0;
+
+static const char* const kReasonNames[TR_COUNT] = {
+  "UNKNOWN", "BOOT", "STEST_OK", "STEST_FAIL",
+  "BTN_MANUAL", "BTN_TIMER1", "BTN_TIMER2", "BTN_STOP", "BTN_SLEEP",
+  "MQTT_ON", "MQTT_OFF", "MODE_REQ",
+  "AUTO_LEVEL", "SMART_FB", "SMART_CUR", "SMART_FLOW",
+  "MD1_FB_ON", "MD1_FB_OFF",
+  "START_OK", "STOP_DONE", "LEVEL_FULL", "LEVEL_DROP",
+  "MAXRUN", "TIMER_END", "FAULT", "PANIC", "LINK_DOWN",
+  "CLEARED", "SLEEP", "WAKE",
+};
+
+const char* sm_reasonName(uint8_t r) {
+  return (r < TR_COUNT) ? kReasonNames[r] : "?";
+}
+
+uint32_t sm_traceSeq()   { return s_traceSeq; }
+size_t   sm_traceCount() { return s_traceCount; }
+
+bool sm_traceGet(size_t idx, StateTrace& out) {
+  if (idx >= s_traceCount) return false;
+  uint8_t start = (uint8_t)((s_traceHead + SM_TRACE_SIZE - s_traceCount) % SM_TRACE_SIZE);
+  out = s_trace[(start + idx) % SM_TRACE_SIZE];
+  return true;
+}
+
+static void traceRecord(uint8_t why, SystemState from, SystemState to) {
+  StateTrace t{};
+  t.ts        = millis();
+  t.reason    = why;
+  t.from      = (uint8_t)from;
+  t.to        = (uint8_t)to;
+  t.mode      = settings().mode;
+  t.levelPct  = sensors_levelPct();
+  t.flowX10   = sensors_flowLpmX10();
+  t.currentMv = sensors_currentMv();
+  t.ampsX10   = sensors_currentAmpsX10();
+  if (sensors_fbOn())              t.flags |= SMTF_FB_ON;
+  if (sensors_fbOff())             t.flags |= SMTF_FB_OFF;
+  if (sensors_currentPresent())    t.flags |= SMTF_CUR_PRES;
+  if (link_alive())                t.flags |= SMTF_LINK_OK;
+  if (settings().bypassCurrentSense) t.flags |= SMTF_BYP_I;
+  if (settings().bypassFlowSense)    t.flags |= SMTF_BYP_FLOW;
+  if (settings().bypassFeedback)     t.flags |= SMTF_BYP_FB;
+  if (settings().smartSense)         t.flags |= SMTF_SMART;
+
+  s_trace[s_traceHead] = t;
+  s_traceHead = (uint8_t)((s_traceHead + 1) % SM_TRACE_SIZE);
+  if (s_traceCount < SM_TRACE_SIZE) s_traceCount++;
+  s_traceSeq++;
+
+  Serial.printf("%s TRACE %s: %s -> %s | fb%u/%u cur%u ia%u.%u fl%u.%u lvl%u lk%u byp%u%u%u ss%u\n",
+    LOG_TAG_SM, sm_reasonName(why), sm_stateName(from), sm_stateName(to),
+    (t.flags & SMTF_FB_ON) ? 1 : 0, (t.flags & SMTF_FB_OFF) ? 1 : 0,
+    (t.flags & SMTF_CUR_PRES) ? 1 : 0,
+    t.ampsX10 / 10, t.ampsX10 % 10, t.flowX10 / 10, t.flowX10 % 10,
+    t.levelPct, (t.flags & SMTF_LINK_OK) ? 1 : 0,
+    (t.flags & SMTF_BYP_I) ? 1 : 0, (t.flags & SMTF_BYP_FLOW) ? 1 : 0,
+    (t.flags & SMTF_BYP_FB) ? 1 : 0, (t.flags & SMTF_SMART) ? 1 : 0);
+}
+
+static void enterState(SystemState ns, uint8_t why) {
   if (ns == s_state) return;
+  traceRecord(why, s_state, ns);
   s_prev = s_state;
   s_state = ns;
   s_enteredAt = millis();
@@ -158,6 +226,11 @@ static void enterState(SystemState ns) {
     default: break;
   }
 }
+
+// Untagged transitions record TR_UNKNOWN rather than failing to compile — an
+// unexplained trace entry is still more useful than none, and points straight
+// at the call site that needs tagging.
+static void enterState(SystemState ns) { enterState(ns, TR_UNKNOWN); }
 
 static void recordFault(FaultCode c, FaultSeverity sev) {
   FaultEntry fe{};
@@ -329,7 +402,7 @@ void sm_handleEvent(const Event& e) {
           // Clear sleep flag so IDLE tick doesn't push us back to SLEEP
           if (settings().sleepMode) settings_setBool("sleepMode", false);
 #if !MONITOR_ONLY_MODE || ALLOW_MANUAL_ACTUATION
-          if (canStartPump()) enterState(ST_STARTING);
+          if (canStartPump()) enterState(ST_STARTING, TR_BTN_MANUAL);
 #else
           Serial.printf("%s MANUAL request ignored (monitor-only)\n", LOG_TAG_SM);
 #endif
@@ -396,7 +469,7 @@ void sm_handleEvent(const Event& e) {
         s_md1Armed     = true;
         s_md1FullAlarm = false;
         s_md1PulsedOff = false;
-        enterState(ST_MANUAL_ON);
+        enterState(ST_MANUAL_ON, TR_MD1_FB_ON);
         s_pumpStartedAt = millis();
         ui_requestUpdate();
         return;
@@ -405,7 +478,7 @@ void sm_handleEvent(const Event& e) {
       if (s_state == ST_IDLE && e.p.boolean && settings().mode != MODE_MD1
           && settings().smartSense && !settings().bypassFeedback) {
         Serial.printf("%s SMART-SENSE: feedback detected, entering monitoring\n", LOG_TAG_SM);
-        enterState(ST_MANUAL_ON);  // enter running state for monitoring
+        enterState(ST_MANUAL_ON, TR_SMART_FB);  // enter running state for monitoring
         s_pumpStartedAt = millis(); // anchor runtime/max-runtime to NOW (not boot)
         ui_requestUpdate();
       }
@@ -423,7 +496,7 @@ void sm_handleEvent(const Event& e) {
           s_md1FullAlarm = false;
           buzzer_silence();
         }
-        if (sm_isPumpRunningState(s_state)) enterState(ST_IDLE);
+        if (sm_isPumpRunningState(s_state)) enterState(ST_IDLE, TR_MD1_FB_OFF);
         ui_requestUpdate();
       }
       return;
@@ -514,7 +587,7 @@ void sm_tick() {
         } else if (sinceMs(s_smartCurrentSince) >= SMART_CURRENT_CONFIRM_MS) {
           s_smartCurrentSince = 0;
           Serial.printf("%s SMART-SENSE: current sustained, entering monitoring\n", LOG_TAG_SM);
-          enterState(ST_MANUAL_ON);
+          enterState(ST_MANUAL_ON, TR_SMART_CUR);
           s_pumpStartedAt = millis();
           ui_requestUpdate();
           break;
@@ -523,7 +596,7 @@ void sm_tick() {
 #if !MONITOR_ONLY_MODE
       // v6: only auto-fill when the tank node link is live (canStartPump()).
       if (settings().mode == MODE_AUTO && link_alive() && sensors_levelPct() < 25) {
-        enterState(ST_STARTING);
+        enterState(ST_STARTING, TR_AUTO_LEVEL);
       }
 #endif
       break;
@@ -549,9 +622,9 @@ void sm_tick() {
 
       if (gotFb && gotCurrent && gotFlow) {
         // Decide which running state
-        if (s_timerActive) enterState(ST_TIMER_RUNNING);
-        else if (settings().mode == MODE_MANUAL) enterState(ST_MANUAL_ON);
-        else enterState(ST_AUTO_FILLING);
+        if (s_timerActive) enterState(ST_TIMER_RUNNING, TR_START_OK);
+        else if (settings().mode == MODE_MANUAL) enterState(ST_MANUAL_ON, TR_START_OK);
+        else enterState(ST_AUTO_FILLING, TR_START_OK);
         break;
       }
       if (needFb && !s_sawFb && since > settings().feedbackMs) {
